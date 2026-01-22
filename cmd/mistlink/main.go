@@ -1,0 +1,82 @@
+package main
+
+import (
+	"flag"
+
+	"github.com/tik-choco-lab/mistlink/internal/config"
+	"github.com/tik-choco-lab/mistlink/internal/logger"
+	"github.com/tik-choco-lab/mistlink/internal/sender"
+)
+
+func main() {
+	var (
+		room       = flag.String("room", "", "Room ID")
+		input      = flag.String("input", "", "Input source (e.g. udp://0.0.0.0:1234)")
+		server     = flag.String("server", "", "MistNet signaling server URL")
+		debug      = flag.Bool("debug", false, "Enable debug logging")
+		showConfig = flag.Bool("show-config", false, "Show config")
+	)
+	flag.BoolVar(debug, "d", false, "Enable debug logging (alias)")
+	flag.BoolVar(showConfig, "c", false, "Show config (alias)")
+	flag.Parse()
+
+	logger.InitWithOptions(logger.Options{
+		Debug:     *debug,
+		UseStderr: true,
+	})
+	defer logger.Sync()
+
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Errorf("main", "Failed to load config file: %v. Using defaults.", err)
+		cfg = config.DefaultConfig()
+		if err := config.Save(cfg); err != nil {
+			logger.Errorf("main", "Failed to save config file: %v", err)
+		}
+	}
+
+	if *showConfig {
+		if err := config.Show(); err != nil {
+			logger.Errorf("main", "Failed to show config: %v", err)
+		}
+		return
+	}
+
+	if *room != "" {
+		cfg.RoomID = *room
+	}
+	if *input != "" {
+		cfg.InputURL = *input
+	}
+	if *server != "" {
+		cfg.SignalingServer = *server
+	}
+
+	if cfg.SignalingServer == "" {
+		cfg.SignalingServer = "wss://rtc.tik-choco.com/signaling"
+	}
+
+	if cfg.RoomID == "" {
+		cfg.RoomID = generateRoomID()
+	}
+
+	if cfg.InputURL == "" {
+		cfg.InputURL = "udp://0.0.0.0:1234"
+	}
+
+	if cfg.RTSPURL == "" {
+		cfg.RTSPURL = "rtsp://localhost:8554/stream"
+	}
+
+	if cfg.WHIPURL == "" {
+		cfg.WHIPURL = "http://localhost:8080/whip"
+	}
+
+	if err := config.Save(cfg); err != nil {
+		logger.Errorf("main", "Failed to save config file: %v", err)
+	}
+
+	if err := sender.Run(cfg); err != nil {
+		logger.Errorf("main", "Execution error: %v", err)
+	}
+}
