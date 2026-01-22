@@ -9,13 +9,12 @@
 -   **WHIP Server**: Native support for WebRTC-HTTP Ingestion Protocol (WHIP), allowing seamless ingestion from OBS.
 -   **RTSP Bridge**: Automatically serves ingested streams over RTSP, optimized for the **AVPro Video** player in VRChat.
 -   **Multi-Protocol Ingestion**: Supports direct UDP (MPEG-TS) ingestion for low-latency scenarios.
--   **Ultra-Low Latency**: Designed for real-time interaction within VRChat worlds.
+-   **Low Latency**: Designed for real-time interaction within VRChat worlds.
 -   **WebRTC Peer-to-Peer**: Integrated signaling client for establishing ultra-low latency P2P connections via [MistNet Signaling](https://github.com/tik-choco-lab/mistnet-signaling).
 
 ## Requirements
 
 -   **Go**: 1.22 or later
--   **Network**: Proper port forwarding if hosting behind a NAT.
 -   **Signaling Server**: A compatible signaling server is required for WebRTC. We recommend using [MistNet Signaling](https://github.com/tik-choco-lab/mistnet-signaling).
 
 ## Installation
