@@ -11,6 +11,11 @@ import (
 	"github.com/tik-choco-lab/mistlink/internal/receiver"
 )
 
+const (
+	videoCodec = 96
+	audioCodec = 111
+)
+
 func HandleMPEGTSStream(
 	udpConn *net.UDPConn,
 	videoTrack *webrtc.TrackLocalStaticRTP,
@@ -29,23 +34,16 @@ func HandleMPEGTSStream(
 	packet := &rtp.Packet{}
 	packetCount := 0
 	lastLogTime := time.Now()
-	firstPacket := true
+	buf := make([]byte, 1500)
 
 	for {
-		buf := make([]byte, 1500)
 		n, _, err := udpConn.ReadFromUDP(buf)
 		if err != nil {
 			logger.Errorf("sender", "RTP read error: %v", err)
 			return
 		}
-		rtpData := buf[:n]
 
-		if firstPacket {
-			logger.Debugf("sender", "First RTP packet received: size=%d bytes", len(rtpData))
-			firstPacket = false
-		}
-
-		if err := packet.Unmarshal(rtpData); err != nil {
+		if err := packet.Unmarshal(buf[:n]); err != nil {
 			logger.Warnf("sender", "RTP parse error: %v (skip)", err)
 			continue
 		}
@@ -55,14 +53,14 @@ func HandleMPEGTSStream(
 		}
 
 		switch packet.PayloadType {
-		case 96: // Video (H.264)
+		case videoCodec: // Video (H.264)
 			if videoTrack != nil {
 				if err := videoTrack.WriteRTP(packet); err != nil {
 					logger.Errorf("sender", "video track write error: %v", err)
 					return
 				}
 			}
-		case 111: // Audio (Opus)
+		case audioCodec: // Audio (Opus)
 			if audioTrack != nil {
 				if err := audioTrack.WriteRTP(packet); err != nil {
 					logger.Errorf("sender", "audio track write error: %v", err)
@@ -71,8 +69,9 @@ func HandleMPEGTSStream(
 			}
 		}
 
-		if bridge != nil && (rtspLoopback || isReceivingRemoteVideo == nil || !isReceivingRemoteVideo.Load()) {
-			if packet.PayloadType == 96 {
+		shouldBridge := bridge != nil && (rtspLoopback || isReceivingRemoteVideo == nil || !isReceivingRemoteVideo.Load())
+		if shouldBridge {
+			if packet.PayloadType == videoCodec {
 				receiver.ProcessVideoPacket(packet, bridge)
 			}
 			bridge.WriteRTP(packet)
