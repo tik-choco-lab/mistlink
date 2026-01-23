@@ -47,6 +47,8 @@ type RTPBridge struct {
 	bufferSize int
 
 	activeTracks map[uint32]string // SSRC -> Type
+	pliMu        sync.Mutex
+	pliHandlers  map[uint32]func()
 }
 
 func NewRTPBridge(rtspPort int, bufferSize int) (*RTPBridge, error) {
@@ -67,6 +69,7 @@ func NewRTPBridge(rtspPort int, bufferSize int) (*RTPBridge, error) {
 		lastInputTimestamp:  make(map[uint8]uint32),
 		lastOutputTimestamp: make(map[uint8]uint32),
 		activeTracks:        make(map[uint32]string),
+		pliHandlers:         make(map[uint32]func()),
 	}
 	b.wg.Add(1)
 	go b.rtpSenderLoop()
@@ -77,6 +80,7 @@ func NewRTPBridge(rtspPort int, bufferSize int) (*RTPBridge, error) {
 		return nil, err
 	}
 	b.server = server
+	b.server.OnPlayCallback = b.RequestIDR
 	return b, nil
 }
 
@@ -95,8 +99,31 @@ func (b *RTPBridge) Stop() {
 
 func (b *RTPBridge) TrackStarted(ssrc uint32, mimeType string) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.activeTracks[ssrc] = mimeType
+	b.mu.Unlock()
+
+	if mimeType == "video/H264" {
+		b.RequestIDR()
+	}
+}
+
+func (b *RTPBridge) RegisterPLIHandler(ssrc uint32, handler func()) {
+	b.pliMu.Lock()
+	defer b.pliMu.Unlock()
+	b.pliHandlers[ssrc] = handler
+}
+
+func (b *RTPBridge) RequestIDR() {
+	b.pliMu.Lock()
+	handlers := make([]func(), 0, len(b.pliHandlers))
+	for _, h := range b.pliHandlers {
+		handlers = append(handlers, h)
+	}
+	b.pliMu.Unlock()
+
+	for _, h := range handlers {
+		go h()
+	}
 }
 
 func (b *RTPBridge) IsStarted() bool {
@@ -107,9 +134,14 @@ func (b *RTPBridge) IsStarted() bool {
 
 func (b *RTPBridge) TrackStopped(ssrc uint32) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	delete(b.activeTracks, ssrc)
+	b.mu.Unlock()
 
+	b.pliMu.Lock()
+	delete(b.pliHandlers, ssrc)
+	b.pliMu.Unlock()
+
+	b.mu.Lock()
 	if len(b.activeTracks) == 0 {
 		if b.server != nil {
 			b.server.StopRealData()
@@ -118,4 +150,5 @@ func (b *RTPBridge) TrackStopped(ssrc uint32) {
 		b.sps = nil
 		b.pps = nil
 	}
+	b.mu.Unlock()
 }

@@ -15,14 +15,15 @@ import (
 )
 
 type Server struct {
-	srv         *gortsplib.Server
-	stream      *gortsplib.ServerStream
-	videoMedia  *description.Media
-	audioMedia  *description.Media
-	h264Format  *format.H264
-	mutex       sync.RWMutex
-	closeChan   chan struct{}
-	hasRealData bool
+	srv            *gortsplib.Server
+	stream         *gortsplib.ServerStream
+	videoMedia     *description.Media
+	audioMedia     *description.Media
+	h264Format     *format.H264
+	mutex          sync.RWMutex
+	closeChan      chan struct{}
+	hasRealData    bool
+	OnPlayCallback func()
 }
 
 func StartServer(rtspPort int) (*Server, error) {
@@ -228,5 +229,8 @@ func (s *Server) OnSetup(ctx *gortsplib.ServerHandlerOnSetupCtx) (*base.Response
 
 func (s *Server) OnPlay(ctx *gortsplib.ServerHandlerOnPlayCtx) (*base.Response, error) {
 	logger.Debugf("rtsp", "Client started playing: %s", ctx.Path)
+	if s.OnPlayCallback != nil {
+		s.OnPlayCallback()
+	}
 	return &base.Response{StatusCode: base.StatusOK}, nil
 }
