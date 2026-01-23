@@ -37,13 +37,11 @@ func (c *PeerConnectionConfigurer) Configure(
 	pc.OnTrack(func(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		mType := track.Codec().MimeType
 		ssrc := uint32(track.SSRC())
-		logger.Infof("sender", "[OnTrack] Remote Track Received: %s (SSRC: %d)", mType, ssrc)
+		pt := track.PayloadType()
+		logger.Infof("sender", "[OnTrack] Remote Track Received: %s (PT: %d, SSRC: %d)", mType, pt, ssrc)
 
 		c.isReceivingRemoteVideo.Store(true)
-		// We don't defer false here because the loop in HandleTrack keeps the connection alive.
-		// TrackStopped in HandleTrack will handle the cleanup if needed.
 
-		// Request IDR frame if it's H.264
 		if strings.EqualFold(mType, webrtc.MimeTypeH264) {
 			go func() {
 				ticker := time.NewTicker(2 * time.Second)
@@ -52,7 +50,7 @@ func (c *PeerConnectionConfigurer) Configure(
 					requestKeyFrame(pc, track)
 					select {
 					case <-ticker.C:
-					case <-c.bridge.StopChan(): // Ensure we don't leak if bridge stops
+					case <-c.bridge.StopChan():
 						return
 					}
 				}
