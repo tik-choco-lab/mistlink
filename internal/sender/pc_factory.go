@@ -139,7 +139,7 @@ func (c *PeerConnectionConfigurer) handleReconnect(peerID string) {
 		return
 	}
 
-	if c.clientID != "" && c.clientID > peerID {
+	if c.clientID != "" && c.clientID > peerID && c.manager.HasOBSTracks() {
 		logger.Infof("sender", "Reconnecting as initiator: %s", peerID)
 		if err := CreatePeerConnection(peerID, c.sigClient, c.webrtcConfig, c.manager, c.udpConn, c.cfg, c.bridge, c.isReceivingRemoteVideo, c.clientID); err != nil {
 			logger.Errorf("sender", "Reconnect error: %v", err)
