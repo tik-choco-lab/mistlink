@@ -3,6 +3,7 @@ package sender
 import (
 	"encoding/json"
 	"net"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -48,6 +49,7 @@ func NewAnswerCallback(
 	manager *stream.StreamManager,
 	bridge *receiver.RTPBridge,
 	pendingCandidates map[string][]webrtc.ICECandidateInit,
+	mu *sync.Mutex,
 ) func(string, string) {
 	return func(answer string, senderID string) {
 		logger.Debugf("sender", "Answer received: %s", senderID)
@@ -57,6 +59,16 @@ func NewAnswerCallback(
 			logger.Warnf("sender", "PC not found for Answer: %s", senderID)
 			return
 		}
+
+	if pc.SignalingState() != webrtc.SignalingStateHaveLocalOffer {
+		logger.Warnf("sender", "Unexpected signaling state for Answer: %s (%s)", senderID, pc.SignalingState().String())
+		return
+	}
+
+	if pc.RemoteDescription() != nil {
+		logger.Warnf("sender", "Answer already set, ignoring: %s", senderID)
+		return
+	}
 
 		var answerSDP webrtc.SessionDescription
 		if err := json.Unmarshal([]byte(answer), &answerSDP); err != nil {
@@ -73,8 +85,10 @@ func NewAnswerCallback(
 
 		logger.Debugf("sender", "Answer set: %s", senderID)
 
+		mu.Lock()
 		candidates := pendingCandidates[senderID]
 		delete(pendingCandidates, senderID)
+		mu.Unlock()
 
 		for _, cand := range candidates {
 			if err := pc.AddICECandidate(cand); err != nil {
@@ -95,6 +109,7 @@ func NewAnswerCallback(
 func NewCandidateCallback(
 	manager *stream.StreamManager,
 	pendingCandidates map[string][]webrtc.ICECandidateInit,
+	mu *sync.Mutex,
 ) func(string, string) {
 	return func(candidate string, senderID string) {
 		var iceCandidate webrtc.ICECandidateInit
@@ -105,12 +120,16 @@ func NewCandidateCallback(
 
 		pc := manager.GetPeerConnection(senderID)
 		if pc == nil {
+			mu.Lock()
 			pendingCandidates[senderID] = append(pendingCandidates[senderID], iceCandidate)
+			mu.Unlock()
 			return
 		}
 
 		if pc.RemoteDescription() == nil {
+			mu.Lock()
 			pendingCandidates[senderID] = append(pendingCandidates[senderID], iceCandidate)
+			mu.Unlock()
 			return
 		}
 
