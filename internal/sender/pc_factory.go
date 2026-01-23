@@ -19,6 +19,9 @@ import (
 const (
 	DefaultStableWaitTimeout = 5 * time.Second
 	DefaultStableWaitTick    = 50 * time.Millisecond
+	ReconnectDelay           = 3 * time.Second
+	IDRRequestInterval       = 2 * time.Second
+	MaxIDRRequests           = 3
 )
 
 type PeerConnectionConfigurer struct {
@@ -47,18 +50,7 @@ func (c *PeerConnectionConfigurer) Configure(
 		c.isReceivingRemoteVideo.Store(true)
 
 		if strings.EqualFold(mType, webrtc.MimeTypeH264) {
-			go func() {
-				ticker := time.NewTicker(2 * time.Second)
-				defer ticker.Stop()
-				for i := 0; i < 3; i++ {
-					requestKeyFrame(pc, track)
-					select {
-					case <-ticker.C:
-					case <-c.bridge.StopChan():
-						return
-					}
-				}
-			}()
+			c.launchIDRRequestLoop(pc, track)
 		}
 
 		receiver.HandleTrack(track, pc.WriteRTCP, c.bridge)
@@ -163,7 +155,7 @@ func (c *PeerConnectionConfigurer) handleReconnect(peerID string) {
 
 func (c *PeerConnectionConfigurer) scheduleReconnectIfStillDisconnected(peerID string, pc *webrtc.PeerConnection) {
 	go func() {
-		time.Sleep(3 * time.Second)
+		time.Sleep(ReconnectDelay)
 		currentPC := c.manager.GetPeerConnection(peerID)
 		if currentPC == nil || currentPC != pc {
 			return
@@ -233,6 +225,30 @@ func WaitForStableAndForward(
 
 		time.Sleep(DefaultStableWaitTick)
 	}
+}
+
+func (c *PeerConnectionConfigurer) launchIDRRequestLoop(pc *webrtc.PeerConnection, track *webrtc.TrackRemote) {
+	ssrc := uint32(track.SSRC())
+	logger.Infof("sender", "[OnTrack] Requesting IDR for Video Track (SSRC: %d)", ssrc)
+
+	go func() {
+		ticker := time.NewTicker(IDRRequestInterval)
+		defer ticker.Stop()
+
+		for i := 0; i < MaxIDRRequests; i++ {
+			requestKeyFrame(pc, track)
+
+			if i >= MaxIDRRequests-1 {
+				break
+			}
+
+			select {
+			case <-ticker.C:
+			case <-c.bridge.StopChan():
+				return
+			}
+		}
+	}()
 }
 
 func requestKeyFrame(pc *webrtc.PeerConnection, track *webrtc.TrackRemote) {
