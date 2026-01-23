@@ -69,7 +69,7 @@ func CreatePeerConnection(
 		go func() {
 			WaitForStableAndForward(receiverID, func() *webrtc.PeerConnection {
 				return pc
-			}, configurer, time.Second, false)
+			}, manager, time.Second, false)
 		}()
 	})
 	if err := configurer.EnsureOutgoingTracks(receiverID, pc, false, true); err != nil {
