@@ -1,10 +1,12 @@
 package receiver
 
 import (
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/pion/rtp"
+	"github.com/tik-choco-lab/mistlink/internal/logger"
 	rtspserver "github.com/tik-choco-lab/mistlink/internal/rtsp"
 )
 
@@ -98,12 +100,12 @@ func (b *RTPBridge) Stop() {
 }
 
 func (b *RTPBridge) TrackStarted(ssrc uint32, mimeType string) {
+	logger.Infof("receiver", "[Bridge] Track Started: %s (SSRC: %d)", mimeType, ssrc)
 	b.mu.Lock()
 	b.activeTracks[ssrc] = mimeType
 	b.mu.Unlock()
 
-	// Initial PLI on start for video tracks
-	if mimeType == "video/H264" || mimeType == "video/h264" || mimeType == "VIDEO/H264" {
+	if strings.HasPrefix(strings.ToLower(mimeType), "video/") && (strings.Contains(strings.ToLower(mimeType), "h264") || strings.Contains(strings.ToLower(mimeType), "avc")) {
 		b.RequestIDR()
 	}
 }
