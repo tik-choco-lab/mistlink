@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"sync/atomic"
 
 	"github.com/pion/interceptor"
@@ -85,6 +86,27 @@ func HandleOfferAsReceiver(
 	}
 
 	receiver.ExtractSPSPPSFromSDP(offer.SDP, bridge)
+
+	// Log SDP statistics to debug renegotiation
+	vCount, aCount, sendCount, recvCount := 0, 0, 0, 0
+	lines := strings.Split(offer.SDP, "\n")
+	for _, line := range lines {
+		l := strings.TrimSpace(line)
+		if strings.HasPrefix(l, "m=video") {
+			vCount++
+		} else if strings.HasPrefix(l, "m=audio") {
+			aCount++
+		}
+
+		// Check direction (it usually follows m= line)
+		if strings.HasPrefix(l, "a=sendonly") || strings.HasPrefix(l, "a=sendrecv") {
+			sendCount++
+		} else if strings.HasPrefix(l, "a=recvonly") {
+			recvCount++
+		}
+	}
+	logger.Debugf("sender", "[Negotiation] Offer Statistics [%s]: video=%d, audio=%d (Directions: senders=%d, receivers=%d)",
+		senderID, vCount, aCount, sendCount, recvCount)
 
 	if err := pc.SetRemoteDescription(offer); err != nil {
 		pc.Close()

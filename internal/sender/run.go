@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/google/uuid"
@@ -61,6 +62,7 @@ func Run(cfg *config.Config) error {
 
 	manager := stream.NewStreamManager(cfg, sigClient, bridge)
 	pendingCandidates := make(map[string][]webrtc.ICECandidateInit)
+	var pendingCandidatesMu sync.Mutex
 
 	var isReceivingRemoteVideo atomic.Bool
 
@@ -77,8 +79,8 @@ func Run(cfg *config.Config) error {
 
 	sigClient.SetCallbacks(
 		NewOfferCallback(manager, sigClient, &webrtcConfig, conn, bridge, &isReceivingRemoteVideo, cfg, clientID),
-		NewAnswerCallback(manager, bridge, pendingCandidates),
-		NewCandidateCallback(manager, pendingCandidates),
+		NewAnswerCallback(manager, bridge, pendingCandidates, &pendingCandidatesMu),
+		NewCandidateCallback(manager, pendingCandidates, &pendingCandidatesMu),
 		NewConnectionCallback(manager, sigClient, &webrtcConfig, conn, bridge, &isReceivingRemoteVideo, cfg, clientID),
 		NewDisconnectCallback(manager),
 	)
