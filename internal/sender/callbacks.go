@@ -2,7 +2,6 @@ package sender
 
 import (
 	"encoding/json"
-	"strings"
 	"sync"
 
 	"github.com/pion/webrtc/v4"
@@ -55,32 +54,8 @@ func NewAnswerCallback(
 		}
 
 		var answerSDP webrtc.SessionDescription
-		trimmed := strings.TrimSpace(answer)
-
-		if strings.HasPrefix(trimmed, "{") {
-			var helper struct {
-				SDP string `json:"sdp"`
-				S   string `json:"SDP"`
-			}
-			if err := json.Unmarshal([]byte(answer), &helper); err == nil {
-				if helper.SDP != "" {
-					answerSDP.SDP = helper.SDP
-				} else {
-					answerSDP.SDP = helper.S
-				}
-				answerSDP.Type = webrtc.SDPTypeAnswer
-			}
-		}
-
-		if answerSDP.SDP == "" {
-			if strings.Contains(trimmed, "v=0") || strings.Contains(trimmed, "o=-") {
-				answerSDP.SDP = answer
-				answerSDP.Type = webrtc.SDPTypeAnswer
-			}
-		}
-
-		if answerSDP.SDP == "" {
-			logger.Errorf("sender", "Invalid Answer format: %s", senderID)
+		if err := json.Unmarshal([]byte(answer), &answerSDP); err != nil {
+			logger.Errorf("sender", "Answer parse error: %v", err)
 			return
 		}
 
