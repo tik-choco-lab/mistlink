@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -68,8 +69,8 @@ func (b *TrackBroadcaster) Start() {
 }
 
 func (b *TrackBroadcaster) run() {
-	isVideo := b.track.Codec().MimeType == webrtc.MimeTypeH264
-	isAudio := b.track.Codec().MimeType == webrtc.MimeTypeOpus
+	isVideo := strings.EqualFold(b.track.Codec().MimeType, webrtc.MimeTypeH264)
+	isAudio := strings.EqualFold(b.track.Codec().MimeType, webrtc.MimeTypeOpus)
 
 	if !isVideo && !isAudio {
 		return

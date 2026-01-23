@@ -101,6 +101,8 @@ func (s *Server) initStreamInternal(sps []byte, pps []byte, isReal bool) {
 	}
 
 	s.stream = gortsplib.NewServerStream(s.srv, desc)
+	sdp, _ := desc.Marshal(false)
+	logger.Debugf("rtsp", "RTSP Stream Initialized. SDP:\n%s", string(sdp))
 	s.videoMedia = desc.Medias[0]
 	s.audioMedia = desc.Medias[1]
 }
@@ -124,7 +126,7 @@ func (s *Server) dummyPacketLoop() {
 
 	var seq uint16
 	var ts uint32
-	ssrc := uint32(0x12345678)
+	ssrc := uint32(rtp_utils.VideoSSRC)
 
 	for {
 		select {
@@ -155,7 +157,7 @@ func (s *Server) dummyPacketLoop() {
 			stream.WritePacketRTP(videoMedia, pkt)
 
 			seq++
-			ts += 9000
+			ts += rtp_utils.DummyTimestampIncrement
 		case <-s.closeChan:
 			logger.Debugf("rtsp", "Dummy packet loop exited.")
 			return
@@ -183,6 +185,10 @@ func (s *Server) WritePacketRTP(pkt *rtp.Packet) error {
 		err := s.stream.WritePacketRTP(s.audioMedia, pkt)
 		if err != nil {
 			logger.Warnf("rtsp", "Audio write error: %v", err)
+		} else {
+			if pkt.SequenceNumber%rtp_utils.LogIntervalPackets == 0 {
+				logger.Debugf("rtsp", "Audio packet sent: seq=%d, ts=%d", pkt.SequenceNumber, pkt.Timestamp)
+			}
 		}
 		return err
 	}

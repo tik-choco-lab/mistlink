@@ -6,6 +6,14 @@ const (
 	PayloadTypeH264 = 96
 	PayloadTypeOpus = 111
 
+	VideoSSRC = 0x12345678
+	AudioSSRC = 0x87654321
+
+	MaxTimestampDelta = 0xFFFFFF
+
+	LogIntervalPackets      = 100
+	DummyTimestampIncrement = 9000
+
 	NALTypeNonIDR = 1
 	NALTypeIDR    = 5
 	NALTypeSEI    = 6
