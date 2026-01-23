@@ -1,6 +1,7 @@
 package receiver
 
 import (
+	"strings"
 	"time"
 
 	"github.com/pion/rtcp"
@@ -11,8 +12,8 @@ import (
 )
 
 func HandleTrack(track *webrtc.TrackRemote, rtcpWriter func([]rtcp.Packet) error, bridge *RTPBridge) {
-	isVideo := track.Codec().MimeType == webrtc.MimeTypeH264
-	isAudio := track.Codec().MimeType == webrtc.MimeTypeOpus
+	isVideo := strings.EqualFold(track.Codec().MimeType, webrtc.MimeTypeH264)
+	isAudio := strings.EqualFold(track.Codec().MimeType, webrtc.MimeTypeOpus)
 
 	if !isVideo && !isAudio {
 		return

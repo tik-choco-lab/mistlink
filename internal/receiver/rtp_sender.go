@@ -225,6 +225,10 @@ func (b *RTPBridge) flushBufferSet(payloadType uint8, server *rtspserver.Server)
 			}
 			packetPool.Put(pkt.Payload)
 		}
-		logger.Debugf("RTSP", "Flushed %d packets for PT %d", len(toSend), payloadType)
+		if payloadType == rtp_utils.PayloadTypeOpus {
+			logger.Debugf("RTSP", "Flushed %d audio packets (PT %d)", len(toSend), payloadType)
+		} else {
+			logger.Debugf("RTSP", "Flushed %d video packets (PT %d)", len(toSend), payloadType)
+		}
 	}
 }
