@@ -26,6 +26,9 @@ func NewOfferCallback(
 	clientID string,
 ) func(string, string) {
 	return func(offer string, senderID string) {
+		if len(offer) < 10 {
+			return
+		}
 		logger.Debugf("sender", "Offer received: %s", senderID)
 		go func() {
 			if existing := manager.GetPeerConnection(senderID); existing != nil {
