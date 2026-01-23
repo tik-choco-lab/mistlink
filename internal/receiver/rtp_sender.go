@@ -64,7 +64,6 @@ func (b *RTPBridge) rtpSenderLoop() {
 				order = &b.videoOrder
 			}
 
-			// If buffer is full, remove the oldest one
 			if len(*order) >= maxBufferSize {
 				oldestSeq := (*order)[0]
 				*order = (*order)[1:]
@@ -74,12 +73,9 @@ func (b *RTPBridge) rtpSenderLoop() {
 				}
 			}
 
-			// Add new packet
-			// If a packet with the same seq already exists, release its payload first
 			if old := buf[pkt.SequenceNumber]; old != nil {
 				packetPool.Put(old.pkt.Payload)
 			} else {
-				// Only add to order if it's a new slot
 				*order = append(*order, pkt.SequenceNumber)
 			}
 
@@ -95,7 +91,6 @@ func (b *RTPBridge) rtpSenderLoop() {
 
 		case <-b.stopChan:
 			b.flushBufferedPackets()
-			// Clean up all remaining packets in buffer
 			b.bufferMu.Lock()
 			b.cleanupBuffer(b.videoBuffer, &b.videoOrder)
 			b.cleanupBuffer(b.audioBuffer, &b.audioOrder)
@@ -150,7 +145,6 @@ func (b *RTPBridge) flushBufferSet(payloadType uint8, server *rtspserver.Server)
 
 	nextSeq, exists := b.nextSeq[payloadType]
 	if !exists {
-		// Initialize nextSeq with the oldest packet in order
 		nextSeq = (*order)[0]
 		b.nextSeq[payloadType] = nextSeq
 	}
@@ -159,11 +153,9 @@ func (b *RTPBridge) flushBufferSet(payloadType uint8, server *rtspserver.Server)
 	for sentInBatch < 500 && len(*order) > 0 {
 		bpkt := buf[nextSeq]
 		if bpkt == nil {
-			// Gap detected. Check if the oldest packet in order is too old.
 			oldestSeq := (*order)[0]
 			oldestPkt := buf[oldestSeq]
 			if oldestPkt != nil && time.Since(oldestPkt.received) > 100*time.Millisecond {
-				// Skip forward to the oldest available packet
 				nextSeq = oldestSeq
 				b.nextSeq[payloadType] = nextSeq
 				continue
@@ -171,7 +163,6 @@ func (b *RTPBridge) flushBufferSet(payloadType uint8, server *rtspserver.Server)
 			break
 		}
 
-		// Prepare packet for sending
 		switch payloadType {
 		case rtp_utils.PayloadTypeH264:
 			bpkt.pkt.SSRC = 0x12345678
@@ -181,10 +172,8 @@ func (b *RTPBridge) flushBufferSet(payloadType uint8, server *rtspserver.Server)
 
 		toSend = append(toSend, bpkt.pkt)
 
-		// Remove from buffer and order
 		buf[nextSeq] = nil
 
-		// Optimized removal from order: check head first (common case)
 		if len(*order) > 0 && (*order)[0] == nextSeq {
 			*order = (*order)[1:]
 		} else {
@@ -202,13 +191,11 @@ func (b *RTPBridge) flushBufferSet(payloadType uint8, server *rtspserver.Server)
 	}
 	b.bufferMu.Unlock()
 
-	// Send outside of lock
 	if len(toSend) > 0 {
 		for _, pkt := range toSend {
 			if err := server.WritePacketRTP(pkt); err != nil {
 				logger.Warnf("RTSP", "RTSP send error: %v", err)
 			}
-			// Return payload to pool after sending
 			packetPool.Put(pkt.Payload)
 		}
 		logger.Debugf("RTSP", "Flushed %d packets for PT %d", len(toSend), payloadType)

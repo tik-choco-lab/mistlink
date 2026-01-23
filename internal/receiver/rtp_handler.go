@@ -22,6 +22,12 @@ func HandleTrack(track *webrtc.TrackRemote, rtcpWriter func([]rtcp.Packet) error
 	bridge.TrackStarted(ssrc, track.Codec().MimeType)
 	defer bridge.TrackStopped(ssrc)
 
+	if isVideo {
+		bridge.RegisterPLIHandler(ssrc, func() {
+			SendPLI(rtcpWriter, track.SSRC())
+		})
+	}
+
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Errorf("receiver", "HandleTrack panic: %v", r)
