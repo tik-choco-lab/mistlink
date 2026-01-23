@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	videoCodec = 96
-	audioCodec = 111
+	videoCodec = 96  // Video (H.264)
+	audioCodec = 111 // Audio (Opus)
 )
 
 func HandleMPEGTSStream(
@@ -53,14 +53,14 @@ func HandleMPEGTSStream(
 		}
 
 		switch packet.PayloadType {
-		case videoCodec: // Video (H.264)
+		case videoCodec:
 			if videoTrack != nil {
 				if err := videoTrack.WriteRTP(packet); err != nil {
 					logger.Errorf("sender", "video track write error: %v", err)
 					return
 				}
 			}
-		case audioCodec: // Audio (Opus)
+		case audioCodec:
 			if audioTrack != nil {
 				if err := audioTrack.WriteRTP(packet); err != nil {
 					logger.Errorf("sender", "audio track write error: %v", err)
