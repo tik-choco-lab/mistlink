@@ -74,6 +74,14 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	if len(config.ICEServers) == 0 {
+		defaultConfig := DefaultConfig()
+		config.ICEServers = defaultConfig.ICEServers
+		if err := Save(&config); err != nil {
+			logger.Errorf("config", "Failed to save updated config: %v", err)
+		}
+	}
+
 	return &config, nil
 }
 
