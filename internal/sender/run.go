@@ -77,11 +77,22 @@ func Run(cfg *config.Config) error {
 		}
 	}()
 
+	configurer := &PeerConnectionConfigurer{
+		sigClient:              sigClient,
+		manager:                manager,
+		udpConn:                conn,
+		cfg:                    cfg,
+		bridge:                 bridge,
+		isReceivingRemoteVideo: &isReceivingRemoteVideo,
+		webrtcConfig:           &webrtcConfig,
+		clientID:               clientID,
+	}
+
 	sigClient.SetCallbacks(
-		NewOfferCallback(manager, sigClient, &webrtcConfig, conn, bridge, &isReceivingRemoteVideo, cfg, clientID),
-		NewAnswerCallback(manager, bridge, pendingCandidates, &pendingCandidatesMu),
+		NewOfferCallback(configurer),
+		NewAnswerCallback(configurer, pendingCandidates, &pendingCandidatesMu),
 		NewCandidateCallback(manager, pendingCandidates, &pendingCandidatesMu),
-		NewConnectionCallback(manager, sigClient, &webrtcConfig, conn, bridge, &isReceivingRemoteVideo, cfg, clientID),
+		NewConnectionCallback(configurer),
 		NewDisconnectCallback(manager),
 	)
 
