@@ -5,6 +5,7 @@ import (
 
 	"github.com/pion/rtp"
 	"github.com/tik-choco-lab/mistlink/internal/logger"
+	"github.com/tik-choco-lab/mistlink/internal/rtp_utils"
 	rtspserver "github.com/tik-choco-lab/mistlink/internal/rtsp"
 )
 
@@ -17,7 +18,6 @@ func (b *RTPBridge) WriteRTP(pkt *rtp.Packet) {
 		return
 	}
 
-	// Use pool for payload
 	payload := packetPool.Get().([]byte)
 	if cap(payload) < len(pkt.Payload) {
 		payload = make([]byte, len(pkt.Payload))
@@ -33,7 +33,6 @@ func (b *RTPBridge) WriteRTP(pkt *rtp.Packet) {
 	select {
 	case b.rtpChan <- packetCopy:
 	default:
-		// Important: if we drop here, we must return the payload to the pool
 		packetPool.Put(payload)
 		logger.Warnf("RTSP", "RTP channel full, dropping packet seq=%d", pkt.SequenceNumber)
 	}
@@ -57,7 +56,7 @@ func (b *RTPBridge) rtpSenderLoop() {
 			var buf []*bufferedPacket
 			var order *[]uint16
 
-			if pkt.PayloadType == 111 {
+			if pkt.PayloadType == rtp_utils.PayloadTypeOpus {
 				buf = b.audioBuffer
 				order = &b.audioOrder
 			} else {
@@ -125,8 +124,8 @@ func (b *RTPBridge) flushBufferedPackets() {
 		return
 	}
 
-	b.flushBufferSet(96, server)
-	b.flushBufferSet(111, server)
+	b.flushBufferSet(rtp_utils.PayloadTypeH264, server)
+	b.flushBufferSet(rtp_utils.PayloadTypeOpus, server)
 }
 
 func (b *RTPBridge) flushBufferSet(payloadType uint8, server *rtspserver.Server) {
@@ -136,7 +135,7 @@ func (b *RTPBridge) flushBufferSet(payloadType uint8, server *rtspserver.Server)
 
 	var buf []*bufferedPacket
 	var order *[]uint16
-	if payloadType == 111 {
+	if payloadType == rtp_utils.PayloadTypeOpus {
 		buf = b.audioBuffer
 		order = &b.audioOrder
 	} else {
@@ -173,9 +172,10 @@ func (b *RTPBridge) flushBufferSet(payloadType uint8, server *rtspserver.Server)
 		}
 
 		// Prepare packet for sending
-		if payloadType == 96 {
+		switch payloadType {
+		case rtp_utils.PayloadTypeH264:
 			bpkt.pkt.SSRC = 0x12345678
-		} else if payloadType == 111 {
+		case rtp_utils.PayloadTypeOpus:
 			bpkt.pkt.SSRC = 0x87654321
 		}
 
