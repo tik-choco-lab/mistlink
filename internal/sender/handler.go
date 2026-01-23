@@ -29,21 +29,48 @@ func HandleOfferAsReceiver(
 	clientID string,
 ) error {
 	var offer webrtc.SessionDescription
-	if err := json.Unmarshal([]byte(offerStr), &offer); err != nil {
-		return fmt.Errorf("Offer parse error: %w", err)
+	trimmed := strings.TrimSpace(offerStr)
+
+	if strings.HasPrefix(trimmed, "{") {
+		var helper struct {
+			Type string `json:"type"`
+			SDP  string `json:"sdp"`
+			T    string `json:"Type"`
+			S    string `json:"SDP"`
+		}
+		if err := json.Unmarshal([]byte(offerStr), &helper); err == nil {
+			if helper.SDP != "" {
+				offer.SDP = helper.SDP
+			} else {
+				offer.SDP = helper.S
+			}
+
+			typeName := helper.Type
+			if typeName == "" {
+				typeName = helper.T
+			}
+			if strings.EqualFold(typeName, "answer") {
+				offer.Type = webrtc.SDPTypeAnswer
+			} else {
+				offer.Type = webrtc.SDPTypeOffer
+			}
+		}
 	}
 
-	sdpLen := len(offer.SDP)
-	sdpSnippet := ""
-	if sdpLen > 50 {
-		sdpSnippet = offer.SDP[:50]
-	} else {
-		sdpSnippet = offer.SDP
+	if offer.SDP == "" {
+		if strings.Contains(trimmed, "v=0") || strings.Contains(trimmed, "o=-") {
+			offer.SDP = offerStr
+			offer.Type = webrtc.SDPTypeOffer
+		}
 	}
-	logger.Debugf("sender", "Offer SDP (Len: %d): %s...", sdpLen, strings.ReplaceAll(sdpSnippet, "\n", " "))
+
+	if offer.SDP == "" {
+		return fmt.Errorf("failed to parse incoming offer: empty SDP or unknown format (length: %d)", len(offerStr))
+	}
+
+	logger.Debugf("sender", "Offer received (parsed). SDP Len: %d, Type: %s", len(offer.SDP), offer.Type.String())
 
 	pc := manager.GetPeerConnection(senderID)
-
 	isNewPC := false
 	if pc == nil || pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
 		m := &webrtc.MediaEngine{}
@@ -96,33 +123,24 @@ func HandleOfferAsReceiver(
 
 	receiver.ExtractSPSPPSFromSDP(offer.SDP, bridge)
 
-	// Log SDP statistics to debug renegotiation
-	vCount, aCount, sendCount, recvCount := 0, 0, 0, 0
-	lines := strings.Split(offer.SDP, "\n")
-	for _, line := range lines {
-		l := strings.TrimSpace(line)
-		if strings.HasPrefix(l, "m=video") {
+	vCount, aCount := 0, 0
+	sdpLines := strings.Split(offer.SDP, "\n")
+	for _, l := range sdpLines {
+		line := strings.TrimSpace(l)
+		if strings.HasPrefix(line, "m=video") {
 			vCount++
-		} else if strings.HasPrefix(l, "m=audio") {
+		} else if strings.HasPrefix(line, "m=audio") {
 			aCount++
 		}
-
-		// Check direction (it usually follows m= line)
-		if strings.HasPrefix(l, "a=sendonly") || strings.HasPrefix(l, "a=sendrecv") {
-			sendCount++
-		} else if strings.HasPrefix(l, "a=recvonly") {
-			recvCount++
-		}
 	}
-	logger.Debugf("sender", "[Negotiation] Offer Statistics [%s]: video=%d, audio=%d (Directions: senders=%d, receivers=%d)",
-		senderID, vCount, aCount, sendCount, recvCount)
+	logger.Debugf("sender", "[Negotiation] Offer Statistics [%s]: video=%d, audio=%d", senderID, vCount, aCount)
 
 	if err := pc.SetRemoteDescription(offer); err != nil {
 		if isNewPC {
 			pc.Close()
 			return err
 		}
-		return fmt.Errorf("SetRemoteDescription Error (renegotiation): %w", err)
+		return fmt.Errorf("SetRemoteDescription Error: %w", err)
 	}
 
 	logger.Debugf("sender", "Creating Answer: %s", senderID)
@@ -132,7 +150,7 @@ func HandleOfferAsReceiver(
 			pc.Close()
 			return err
 		}
-		return fmt.Errorf("CreateAnswer Error (renegotiation): %w", err)
+		return fmt.Errorf("CreateAnswer Error: %w", err)
 	}
 
 	if err := pc.SetLocalDescription(answer); err != nil {
@@ -140,7 +158,7 @@ func HandleOfferAsReceiver(
 			pc.Close()
 			return err
 		}
-		return fmt.Errorf("SetLocalDescription Error (renegotiation): %w", err)
+		return fmt.Errorf("SetLocalDescription Error: %w", err)
 	}
 
 	answerJSON, _ := json.Marshal(answer)
