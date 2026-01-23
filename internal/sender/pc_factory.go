@@ -14,11 +14,7 @@ import (
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 	"github.com/tik-choco-lab/mistlink/internal/receiver"
 	"github.com/tik-choco-lab/mistlink/internal/stream"
-)
-
-const (
-	DefaultStableWaitTimeout = 5 * time.Second
-	DefaultStableWaitTick    = 50 * time.Millisecond
+	"github.com/tik-choco-lab/mistlink/internal/webrtc_utils"
 )
 
 type PeerConnectionConfigurer struct {
@@ -137,7 +133,46 @@ func (c *PeerConnectionConfigurer) EnsureOutgoingTracks(
 		return nil
 	}
 
-	logger.Debugf("sender", "No outgoing tracks to forward (Receiver mode) [%s]", peerID)
+	if pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
+		return nil
+	}
+
+	logger.Debugf("sender", "No OBS tracks. Using UDP track [%s]", peerID)
+	videoTrack, err := webrtc.NewTrackLocalStaticRTP(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264},
+		"video",
+		"mistlink",
+	)
+	if err != nil {
+		pc.Close()
+		return err
+	}
+
+	audioTrack, err := webrtc.NewTrackLocalStaticRTP(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
+		"audio",
+		"mistlink",
+	)
+	if err != nil {
+		pc.Close()
+		return err
+	}
+
+	videoSender, err := pc.AddTrack(videoTrack)
+	if err != nil {
+		pc.Close()
+		return err
+	}
+	webrtc_utils.StartRTCPReadLoop(videoSender)
+
+	audioSender, err := pc.AddTrack(audioTrack)
+	if err != nil {
+		pc.Close()
+		return err
+	}
+	webrtc_utils.StartRTCPReadLoop(audioSender)
+
+	go HandleMPEGTSStream(c.udpConn, videoTrack, audioTrack, c.bridge, c.isReceivingRemoteVideo, c.cfg.RTSPLoopback)
 	return nil
 }
 
@@ -206,7 +241,7 @@ func peerConnectionHasSender(pc *webrtc.PeerConnection) bool {
 func WaitForStableAndForward(
 	receiverID string,
 	getPC func() *webrtc.PeerConnection,
-	configurer *PeerConnectionConfigurer,
+	manager *stream.StreamManager,
 	timeout time.Duration,
 	logOnStable bool,
 ) {
@@ -220,9 +255,9 @@ func WaitForStableAndForward(
 		signalingState := currentPC.SignalingState()
 		if signalingState == webrtc.SignalingStateStable {
 			if logOnStable {
-				logger.Debugf("sender", "Signaling Stable. Checking tracks [%s]", receiverID)
+				logger.Debugf("sender", "Signaling Stable. Adding OBS tracks [%s]", receiverID)
 			}
-			configurer.EnsureOutgoingTracks(receiverID, currentPC, true, true)
+			manager.ForwardOBSTracksToReceiver(receiverID, currentPC, false)
 			return
 		}
 
@@ -231,7 +266,7 @@ func WaitForStableAndForward(
 			return
 		}
 
-		time.Sleep(DefaultStableWaitTick)
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

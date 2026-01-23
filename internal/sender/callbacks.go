@@ -2,32 +2,46 @@ package sender
 
 import (
 	"encoding/json"
+	"net"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/pion/webrtc/v4"
+	"github.com/tik-choco-lab/mistlink/internal/config"
+	"github.com/tik-choco-lab/mistlink/internal/domain"
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 	"github.com/tik-choco-lab/mistlink/internal/receiver"
 	"github.com/tik-choco-lab/mistlink/internal/stream"
 )
 
-func NewOfferCallback(c *PeerConnectionConfigurer) func(string, string) {
+func NewOfferCallback(
+	manager *stream.StreamManager,
+	sigClient domain.SignalingService,
+	webrtcConfig *webrtc.Configuration,
+	conn *net.UDPConn,
+	bridge *receiver.RTPBridge,
+	isReceivingRemoteVideo *atomic.Bool,
+	cfg *config.Config,
+	clientID string,
+) func(string, string) {
 	return func(offer string, senderID string) {
 		if len(offer) < 10 {
 			return
 		}
 		logger.Debugf("sender", "Offer received: %s", senderID)
 		go func() {
-			if existing := c.manager.GetPeerConnection(senderID); existing != nil {
+			if existing := manager.GetPeerConnection(senderID); existing != nil {
 				state := existing.ConnectionState()
 				if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
 					logger.Debugf("sender", "Replacing failed/closed PC for Offer: %s", senderID)
 					existing.Close()
-					c.manager.RemovePeerConnection(senderID)
+					manager.RemovePeerConnection(senderID)
 				} else {
 					logger.Debugf("sender", "Reusing existing PC for Offer: %s", senderID)
 				}
 			}
-			if err := HandleOfferAsReceiver(offer, senderID, c.sigClient, c.webrtcConfig, c.manager, c.udpConn, c.bridge, c.isReceivingRemoteVideo, c.cfg, c.clientID); err != nil {
+			if err := HandleOfferAsReceiver(offer, senderID, sigClient, webrtcConfig, manager, conn, bridge, isReceivingRemoteVideo, cfg, clientID); err != nil {
 				logger.Errorf("sender", "Offer handle error: %v", err)
 			}
 		}()
@@ -35,14 +49,15 @@ func NewOfferCallback(c *PeerConnectionConfigurer) func(string, string) {
 }
 
 func NewAnswerCallback(
-	c *PeerConnectionConfigurer,
+	manager *stream.StreamManager,
+	bridge *receiver.RTPBridge,
 	pendingCandidates map[string][]webrtc.ICECandidateInit,
 	mu *sync.Mutex,
 ) func(string, string) {
 	return func(answer string, senderID string) {
 		logger.Debugf("sender", "Answer received: %s", senderID)
 
-		pc := c.manager.GetPeerConnection(senderID)
+		pc := manager.GetPeerConnection(senderID)
 		if pc == nil {
 			logger.Warnf("sender", "PC not found for Answer: %s", senderID)
 			return
@@ -59,7 +74,7 @@ func NewAnswerCallback(
 			return
 		}
 
-		receiver.ExtractSPSPPSFromSDP(answerSDP.SDP, c.bridge)
+		receiver.ExtractSPSPPSFromSDP(answerSDP.SDP, bridge)
 
 		if err := pc.SetRemoteDescription(answerSDP); err != nil {
 			logger.Errorf("sender", "SetRemoteDescription error: %v", err)
@@ -81,9 +96,11 @@ func NewAnswerCallback(
 			}
 		}
 
-		go WaitForStableAndForward(senderID, func() *webrtc.PeerConnection {
-			return c.manager.GetPeerConnection(senderID)
-		}, c, DefaultStableWaitTimeout, true)
+		go func() {
+			WaitForStableAndForward(senderID, func() *webrtc.PeerConnection {
+				return manager.GetPeerConnection(senderID)
+			}, manager, time.Second, true)
+		}()
 	}
 }
 
@@ -123,26 +140,27 @@ func NewCandidateCallback(
 	}
 }
 
-func NewConnectionCallback(c *PeerConnectionConfigurer) func(string) {
+func NewConnectionCallback(
+	manager *stream.StreamManager,
+	sigClient domain.SignalingService,
+	webrtcConfig *webrtc.Configuration,
+	conn *net.UDPConn,
+	bridge *receiver.RTPBridge,
+	isReceivingRemoteVideo *atomic.Bool,
+	cfg *config.Config,
+	clientID string,
+) func(string) {
 	return func(senderID string) {
-		logger.Debugf("sender", "Connection request: %s (MyID: %s)", senderID, c.clientID)
+		logger.Debugf("sender", "Connection request: %s (MyID: %s)", senderID, clientID)
 
-		if c.clientID <= senderID {
-			logger.Debugf("sender", "[Glare Avoidance] PeerID(%s) >= MyID(%s). Skip offer.", senderID, c.clientID)
+		if clientID <= senderID {
+			logger.Debugf("sender", "[Glare Avoidance] PeerID(%s) >= MyID(%s). Skip offer.", senderID, clientID)
 			return
-		}
-
-		if existing := c.manager.GetPeerConnection(senderID); existing != nil {
-			state := existing.ConnectionState()
-			if state == webrtc.PeerConnectionStateConnected || state == webrtc.PeerConnectionStateConnecting {
-				logger.Debugf("sender", "PC already exists and is active, skipping connection request [%s]", senderID)
-				return
-			}
 		}
 
 		logger.Debugf("sender", "Creating offer as initiator")
 		go func() {
-			if err := CreatePeerConnection(senderID, c.sigClient, c.webrtcConfig, c.manager, c.udpConn, c.cfg, c.bridge, c.isReceivingRemoteVideo, c.clientID); err != nil {
+			if err := CreatePeerConnection(senderID, sigClient, webrtcConfig, manager, conn, cfg, bridge, isReceivingRemoteVideo, clientID); err != nil {
 				logger.Errorf("sender", "PC creation error: %v", err)
 			} else {
 				logger.Debugf("sender", "PC created: %s", senderID)
