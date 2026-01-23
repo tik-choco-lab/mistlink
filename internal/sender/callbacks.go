@@ -152,11 +152,6 @@ func NewConnectionCallback(c *PeerConnectionConfigurer) func(string) {
 	return func(senderID string) {
 		logger.Debugf("sender", "Connection request: %s (MyID: %s)", senderID, c.clientID)
 
-		if !c.manager.HasOBSTracks() {
-			logger.Debugf("sender", "Receiver mode: Waiting for peer's offer [%s]", senderID)
-			return
-		}
-
 		if c.clientID <= senderID {
 			logger.Debugf("sender", "[Glare Avoidance] PeerID(%s) >= MyID(%s). Skip offer.", senderID, c.clientID)
 			return
