@@ -102,7 +102,8 @@ func (b *RTPBridge) TrackStarted(ssrc uint32, mimeType string) {
 	b.activeTracks[ssrc] = mimeType
 	b.mu.Unlock()
 
-	if mimeType == "video/H264" {
+	// Initial PLI on start for video tracks
+	if mimeType == "video/H264" || mimeType == "video/h264" || mimeType == "VIDEO/H264" {
 		b.RequestIDR()
 	}
 }
