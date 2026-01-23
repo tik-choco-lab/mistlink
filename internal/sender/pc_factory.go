@@ -3,6 +3,7 @@ package sender
 import (
 	"encoding/json"
 	"net"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -34,13 +35,16 @@ func (c *PeerConnectionConfigurer) Configure(
 	onConnected func(),
 ) {
 	pc.OnTrack(func(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
-		logger.Infof("sender", "Remote Video Track: %s (SSRC: %d)", track.Codec().MimeType, track.SSRC())
+		mType := track.Codec().MimeType
+		ssrc := uint32(track.SSRC())
+		logger.Infof("sender", "[OnTrack] Remote Track Received: %s (SSRC: %d)", mType, ssrc)
 
 		c.isReceivingRemoteVideo.Store(true)
-		defer c.isReceivingRemoteVideo.Store(false)
+		// We don't defer false here because the loop in HandleTrack keeps the connection alive.
+		// TrackStopped in HandleTrack will handle the cleanup if needed.
 
-		// 送信側にIDRフレームを要求
-		if track.Codec().MimeType == webrtc.MimeTypeH264 {
+		// Request IDR frame if it's H.264
+		if strings.EqualFold(mType, webrtc.MimeTypeH264) {
 			go func() {
 				ticker := time.NewTicker(2 * time.Second)
 				defer ticker.Stop()
@@ -48,13 +52,18 @@ func (c *PeerConnectionConfigurer) Configure(
 					requestKeyFrame(pc, track)
 					select {
 					case <-ticker.C:
+					case <-c.bridge.StopChan(): // Ensure we don't leak if bridge stops
+						return
 					}
 				}
 			}()
 		}
 
-		logger.Infof("sender", "Handling track: %s (SSRC: %d)", track.Codec().MimeType, track.SSRC())
 		receiver.HandleTrack(track, pc.WriteRTCP, c.bridge)
+	})
+
+	pc.OnNegotiationNeeded(func() {
+		logger.Debugf("sender", "[OnNegotiationNeeded] Negotiation needed for %s (State: %s)", peerID, pc.SignalingState().String())
 	})
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
@@ -105,6 +114,7 @@ func (c *PeerConnectionConfigurer) EnsureOutgoingTracks(
 	skipOffer bool,
 ) error {
 	if skipIfHasSender && peerConnectionHasSender(pc) {
+		logger.Debugf("sender", "PC already has senders, skipping outgoing track addition [%s]", peerID)
 		return nil
 	}
 

@@ -153,3 +153,7 @@ func (b *RTPBridge) TrackStopped(ssrc uint32) {
 	}
 	b.mu.Unlock()
 }
+
+func (b *RTPBridge) StopChan() <-chan struct{} {
+	return b.stopChan
+}

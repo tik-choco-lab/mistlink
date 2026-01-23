@@ -60,15 +60,10 @@ func NewAnswerCallback(
 			return
 		}
 
-	if pc.SignalingState() != webrtc.SignalingStateHaveLocalOffer {
-		logger.Warnf("sender", "Unexpected signaling state for Answer: %s (%s)", senderID, pc.SignalingState().String())
-		return
-	}
-
-	if pc.RemoteDescription() != nil {
-		logger.Warnf("sender", "Answer already set, ignoring: %s", senderID)
-		return
-	}
+		if pc.SignalingState() != webrtc.SignalingStateHaveLocalOffer {
+			logger.Warnf("sender", "Unexpected signaling state for Answer: %s (%s)", senderID, pc.SignalingState().String())
+			return
+		}
 
 		var answerSDP webrtc.SessionDescription
 		if err := json.Unmarshal([]byte(answer), &answerSDP); err != nil {
