@@ -61,7 +61,12 @@ func (c *PeerConnectionConfigurer) Configure(
 	})
 
 	pc.OnNegotiationNeeded(func() {
-		logger.Debugf("sender", "[OnNegotiationNeeded] Negotiation needed for %s (State: %s)", peerID, pc.SignalingState().String())
+		state := pc.SignalingState()
+		logger.Debugf("sender", "[OnNegotiationNeeded] Negotiation needed for %s (State: %s)", peerID, state.String())
+
+		if state != webrtc.SignalingStateStable {
+			return
+		}
 	})
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
@@ -111,9 +116,15 @@ func (c *PeerConnectionConfigurer) EnsureOutgoingTracks(
 	skipIfHasSender bool,
 	skipOffer bool,
 ) error {
-	if skipIfHasSender && peerConnectionHasSender(pc) {
-		logger.Debugf("sender", "PC already has senders, skipping outgoing track addition [%s]", peerID)
-		return nil
+	hasSender := peerConnectionHasSender(pc)
+	connState := pc.ConnectionState()
+
+	if skipIfHasSender && hasSender {
+		if connState == webrtc.PeerConnectionStateConnected {
+			logger.Debugf("sender", "PC already connected and has senders, skipping outgoing track addition [%s]", peerID)
+			return nil
+		}
+		logger.Debugf("sender", "PC already has senders, checking for additional tracks [%s]", peerID)
 	}
 
 	if c.manager.HasOBSTracks() {

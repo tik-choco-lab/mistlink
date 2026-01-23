@@ -39,7 +39,7 @@ func HandleTrack(track *webrtc.TrackRemote, rtcpWriter func([]rtcp.Packet) error
 
 	lastPLITime := time.Now()
 	for {
-		track.SetReadDeadline(time.Now().Add(5 * time.Second))
+		track.SetReadDeadline(time.Now().Add(15 * time.Second))
 		pkt, _, err := track.ReadRTP()
 		if err != nil {
 			logger.Errorf("receiver", "Track read error: %v", err)
