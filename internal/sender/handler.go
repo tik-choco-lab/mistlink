@@ -33,6 +33,15 @@ func HandleOfferAsReceiver(
 		return fmt.Errorf("Offer parse error: %w", err)
 	}
 
+	sdpLen := len(offer.SDP)
+	sdpSnippet := ""
+	if sdpLen > 50 {
+		sdpSnippet = offer.SDP[:50]
+	} else {
+		sdpSnippet = offer.SDP
+	}
+	logger.Debugf("sender", "Offer SDP (Len: %d): %s...", sdpLen, strings.ReplaceAll(sdpSnippet, "\n", " "))
+
 	pc := manager.GetPeerConnection(senderID)
 
 	isNewPC := false
@@ -109,20 +118,29 @@ func HandleOfferAsReceiver(
 		senderID, vCount, aCount, sendCount, recvCount)
 
 	if err := pc.SetRemoteDescription(offer); err != nil {
-		pc.Close()
-		return err
+		if isNewPC {
+			pc.Close()
+			return err
+		}
+		return fmt.Errorf("SetRemoteDescription Error (renegotiation): %w", err)
 	}
 
 	logger.Debugf("sender", "Creating Answer: %s", senderID)
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
-		pc.Close()
-		return err
+		if isNewPC {
+			pc.Close()
+			return err
+		}
+		return fmt.Errorf("CreateAnswer Error (renegotiation): %w", err)
 	}
 
 	if err := pc.SetLocalDescription(answer); err != nil {
-		pc.Close()
-		return err
+		if isNewPC {
+			pc.Close()
+			return err
+		}
+		return fmt.Errorf("SetLocalDescription Error (renegotiation): %w", err)
 	}
 
 	answerJSON, _ := json.Marshal(answer)
