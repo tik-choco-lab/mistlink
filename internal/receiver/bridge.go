@@ -14,6 +14,12 @@ type bufferedPacket struct {
 	payloadType uint8
 }
 
+var packetPool = sync.Pool{
+	New: func() interface{} {
+		return make([]byte, 2048) // MTU size
+	},
+}
+
 type RTPBridge struct {
 	rtspPort int
 
@@ -27,8 +33,10 @@ type RTPBridge struct {
 	stopChan chan struct{}
 	wg       sync.WaitGroup
 
-	videoBuffer map[uint16]*bufferedPacket
-	audioBuffer map[uint16]*bufferedPacket
+	videoBuffer []*bufferedPacket
+	videoOrder  []uint16
+	audioBuffer []*bufferedPacket
+	audioOrder  []uint16
 	bufferMu    sync.Mutex
 	nextSeq     map[uint8]uint16
 	outgoingSeq map[uint8]uint16
@@ -50,8 +58,10 @@ func NewRTPBridge(rtspPort int, bufferSize int) (*RTPBridge, error) {
 		bufferSize:          bufferSize,
 		rtpChan:             make(chan *rtp.Packet, bufferSize),
 		stopChan:            make(chan struct{}),
-		videoBuffer:         make(map[uint16]*bufferedPacket),
-		audioBuffer:         make(map[uint16]*bufferedPacket),
+		videoBuffer:         make([]*bufferedPacket, 65536),
+		videoOrder:          make([]uint16, 0, bufferSize),
+		audioBuffer:         make([]*bufferedPacket, 65536),
+		audioOrder:          make([]uint16, 0, bufferSize),
 		nextSeq:             make(map[uint8]uint16),
 		outgoingSeq:         make(map[uint8]uint16),
 		lastInputTimestamp:  make(map[uint8]uint32),
