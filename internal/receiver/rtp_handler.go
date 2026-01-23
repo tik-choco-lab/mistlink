@@ -19,14 +19,14 @@ func HandleTrack(track *webrtc.TrackRemote, rtcpWriter func([]rtcp.Packet) error
 	}
 
 	ssrc := uint32(track.SSRC())
-	bridge.TrackStarted(ssrc, track.Codec().MimeType)
-	defer bridge.TrackStopped(ssrc)
-
 	if isVideo {
 		bridge.RegisterPLIHandler(ssrc, func() {
 			SendPLI(rtcpWriter, track.SSRC())
 		})
 	}
+
+	bridge.TrackStarted(ssrc, track.Codec().MimeType)
+	defer bridge.TrackStopped(ssrc)
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -151,6 +151,6 @@ func SendPLI(rtcpWriter func([]rtcp.Packet) error, ssrc webrtc.SSRC) {
 	if err := rtcpWriter([]rtcp.Packet{pli}); err != nil {
 		logger.Errorf("receiver", "Failed to send PLI: %v", err)
 	} else {
-		logger.Debugf("receiver", "Sent PLI to request keyframe (Bridge not started)")
+		logger.Debugf("receiver", "Sent PLI to request keyframe (SSRC: %d)", ssrc)
 	}
 }
