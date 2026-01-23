@@ -11,6 +11,7 @@ import (
 	"github.com/bluenviron/gortsplib/v4/pkg/format"
 	"github.com/pion/rtp"
 	"github.com/tik-choco-lab/mistlink/internal/logger"
+	"github.com/tik-choco-lab/mistlink/internal/rtp_utils"
 )
 
 type Server struct {
@@ -75,14 +76,14 @@ func (s *Server) initStreamInternal(sps []byte, pps []byte, isReal bool) {
 	}
 
 	s.h264Format = &format.H264{
-		PayloadTyp:        96,
+		PayloadTyp:        rtp_utils.PayloadTypeH264,
 		PacketizationMode: 1,
 		SPS:               sps,
 		PPS:               pps,
 	}
 
 	opusFormat := &format.Opus{
-		PayloadTyp: 111,
+		PayloadTyp: rtp_utils.PayloadTypeOpus,
 	}
 
 	desc := &description.Session{
@@ -141,7 +142,7 @@ func (s *Server) dummyPacketLoop() {
 			pkt := &rtp.Packet{
 				Header: rtp.Header{
 					Version:        2,
-					PayloadType:    96,
+					PayloadType:    rtp_utils.PayloadTypeH264,
 					SequenceNumber: seq,
 					Timestamp:      ts,
 					SSRC:           ssrc,
@@ -169,7 +170,7 @@ func (s *Server) WritePacketRTP(pkt *rtp.Packet) error {
 		return nil
 	}
 
-	if pkt.PayloadType == 96 && s.videoMedia != nil {
+	if pkt.PayloadType == rtp_utils.PayloadTypeH264 && s.videoMedia != nil {
 		err := s.stream.WritePacketRTP(s.videoMedia, pkt)
 		if err != nil {
 			logger.Warnf("rtsp", "Video write error: %v (seq=%d, ts=%d, ssrc=%d)",
@@ -177,7 +178,7 @@ func (s *Server) WritePacketRTP(pkt *rtp.Packet) error {
 		}
 		return err
 	}
-	if pkt.PayloadType == 111 && s.audioMedia != nil {
+	if pkt.PayloadType == rtp_utils.PayloadTypeOpus && s.audioMedia != nil {
 		err := s.stream.WritePacketRTP(s.audioMedia, pkt)
 		if err != nil {
 			logger.Warnf("rtsp", "Audio write error: %v", err)

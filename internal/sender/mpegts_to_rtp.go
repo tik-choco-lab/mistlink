@@ -9,11 +9,7 @@ import (
 	"github.com/pion/webrtc/v4"
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 	"github.com/tik-choco-lab/mistlink/internal/receiver"
-)
-
-const (
-	videoCodec = 96  // Video (H.264)
-	audioCodec = 111 // Audio (Opus)
+	"github.com/tik-choco-lab/mistlink/internal/rtp_utils"
 )
 
 func HandleMPEGTSStream(
@@ -53,14 +49,14 @@ func HandleMPEGTSStream(
 		}
 
 		switch packet.PayloadType {
-		case videoCodec:
+		case rtp_utils.PayloadTypeH264:
 			if videoTrack != nil {
 				if err := videoTrack.WriteRTP(packet); err != nil {
 					logger.Errorf("sender", "video track write error: %v", err)
 					return
 				}
 			}
-		case audioCodec:
+		case rtp_utils.PayloadTypeOpus:
 			if audioTrack != nil {
 				if err := audioTrack.WriteRTP(packet); err != nil {
 					logger.Errorf("sender", "audio track write error: %v", err)
@@ -71,7 +67,7 @@ func HandleMPEGTSStream(
 
 		shouldBridge := bridge != nil && (rtspLoopback || isReceivingRemoteVideo == nil || !isReceivingRemoteVideo.Load())
 		if shouldBridge {
-			if packet.PayloadType == videoCodec {
+			if packet.PayloadType == rtp_utils.PayloadTypeH264 {
 				receiver.ProcessVideoPacket(packet, bridge)
 			}
 			bridge.WriteRTP(packet)
