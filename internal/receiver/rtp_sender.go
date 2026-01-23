@@ -165,10 +165,37 @@ func (b *RTPBridge) flushBufferSet(payloadType uint8, server *rtspserver.Server)
 
 		switch payloadType {
 		case rtp_utils.PayloadTypeH264:
-			bpkt.pkt.SSRC = 0x12345678
+			bpkt.pkt.SSRC = rtp_utils.VideoSSRC
 		case rtp_utils.PayloadTypeOpus:
-			bpkt.pkt.SSRC = 0x87654321
+			bpkt.pkt.SSRC = rtp_utils.AudioSSRC
 		}
+
+		b.mu.Lock()
+		outSeq := b.outgoingSeq[payloadType]
+		lastInTS, _ := b.lastInputTimestamp[payloadType]
+		lastOutTS, hasOutTS := b.lastOutputTimestamp[payloadType]
+
+		originalTS := bpkt.pkt.Timestamp
+
+		if !hasOutTS {
+			b.lastOutputTimestamp[payloadType] = bpkt.pkt.Timestamp
+			b.outgoingSeq[payloadType] = bpkt.pkt.SequenceNumber
+			outSeq = bpkt.pkt.SequenceNumber
+		} else {
+			delta := originalTS - lastInTS
+			if delta > rtp_utils.MaxTimestampDelta {
+				delta = 0
+			}
+			newTS := lastOutTS + delta
+			bpkt.pkt.Timestamp = newTS
+			b.lastOutputTimestamp[payloadType] = newTS
+
+			outSeq++
+			bpkt.pkt.SequenceNumber = outSeq
+			b.outgoingSeq[payloadType] = outSeq
+		}
+		b.lastInputTimestamp[payloadType] = originalTS
+		b.mu.Unlock()
 
 		toSend = append(toSend, bpkt.pkt)
 
