@@ -8,6 +8,8 @@ import (
 )
 
 func (b *RTPBridge) WriteRTP(pkt *rtp.Packet) {
+	b.Broadcast(pkt)
+
 	b.mu.Lock()
 	started := b.started
 	b.mu.Unlock()
