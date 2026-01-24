@@ -223,7 +223,7 @@ func (c *PeerConnectionConfigurer) cleanupPeerConnection(peerID string, pc *webr
 	if pc != nil {
 		pc.Close()
 	}
-	c.manager.RemovePeerConnection(peerID)
+	c.manager.RemovePeerConnectionMatching(peerID, pc)
 }
 
 func closeIfOpen(ch chan struct{}) {
