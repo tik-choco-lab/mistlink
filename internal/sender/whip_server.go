@@ -3,7 +3,9 @@ package sender
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,12 +19,13 @@ import (
 )
 
 func StartWHIPServer(
-	addr string,
+	whipHost string,
+	whipPort int,
 	webrtcConfig *webrtc.Configuration,
 	manager *stream.StreamManager,
 	bridge *receiver.RTPBridge,
 	cfg *config.Config,
-) error {
+) (int, error) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/whip", func(w http.ResponseWriter, r *http.Request) {
@@ -111,12 +114,38 @@ func StartWHIPServer(
 		w.Write(respSDP)
 	})
 
+	currentPort := whipPort
+	var ln net.Listener
+	var err error
+
+	for {
+		bindHost := whipHost
+		if bindHost == "localhost" {
+			bindHost = ""
+		}
+		addr := net.JoinHostPort(bindHost, strconv.Itoa(currentPort))
+		ln, err = net.Listen("tcp", addr)
+		if err == nil {
+			break
+		}
+		if strings.Contains(err.Error(), "address already in use") || strings.Contains(err.Error(), "bind: Only one usage") {
+			logger.Warnf("sender", "WHIP Port %d already in use, trying next...", currentPort)
+			currentPort++
+			continue
+		}
+		return 0, err
+	}
+
 	server := &http.Server{
-		Addr:              addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	logger.Debugf("sender", "WHIP server started: http://localhost%s/whip", addr)
-	return server.ListenAndServe()
+	displayHost := whipHost
+	if displayHost == "" {
+		displayHost = "localhost"
+	}
+	logger.Debugf("sender", "WHIP server started: http://%s:%d/whip", displayHost, currentPort)
+	go server.Serve(ln)
+	return currentPort, nil
 }

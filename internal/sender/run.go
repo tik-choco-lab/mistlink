@@ -3,7 +3,7 @@ package sender
 import (
 	"fmt"
 	"net"
-	"regexp"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,17 +18,35 @@ import (
 	"github.com/tik-choco-lab/mistlink/internal/stream"
 )
 
+const (
+	DefaultRTSPPort  = 554
+	DefaultRTSPSPort = 322
+	DefaultHTTPPort  = 80
+	DefaultHTTPSPort = 443
+)
+
 func Run(cfg *config.Config) error {
 	addr, err := parseUDPAddr(cfg.InputURL)
 	if err != nil {
 		return fmt.Errorf("udp addr parse error: %w", err)
 	}
 
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
+	var conn *net.UDPConn
+	for {
+		conn, err = net.ListenUDP("udp", addr)
+		if err == nil {
+			break
+		}
+		if strings.Contains(err.Error(), "address already in use") || strings.Contains(err.Error(), "bind: Only one usage") {
+			logger.Warnf("sender", "UDP Port %d already in use, trying next...", addr.Port)
+			addr.Port++
+			continue
+		}
 		return fmt.Errorf("udp listen error: %w", err)
 	}
 	defer conn.Close()
+
+	cfg.InputURL = fmt.Sprintf("udp://%s", addr.String())
 
 	logger.Debugf("sender", "UDP listening on: %s", addr.String())
 
@@ -44,21 +62,30 @@ func Run(cfg *config.Config) error {
 	webrtcConfig := webrtc.Configuration{
 		ICEServers: cfg.ICEServers,
 	}
-	re := regexp.MustCompile(`:(\d+)`)
-	matches := re.FindStringSubmatch(cfg.RTSPURL)
-	if len(matches) != 2 {
-		return fmt.Errorf("rtsp port parse error: %w", err)
-	}
-	rtspPort := matches[1]
-	rtspPortInt, err := strconv.Atoi(rtspPort)
+	u, err := url.Parse(cfg.RTSPURL)
 	if err != nil {
-		return fmt.Errorf("rtsp port parse error: %w", err)
+		return fmt.Errorf("rtsp url parse error: %w", err)
 	}
-	bridge, err := receiver.NewRTPBridge(rtspPortInt, 5000, cfg.AudioCodec)
+	rtspHost, rtspPort, _ := net.SplitHostPort(u.Host)
+	if rtspPort == "" {
+		if u.Scheme == "rtsps" {
+			rtspPort = strconv.Itoa(DefaultRTSPSPort)
+		} else {
+			rtspPort = strconv.Itoa(DefaultRTSPPort)
+		}
+	}
+	rtspPortInt, _ := strconv.Atoi(rtspPort)
+
+	bridge, actualRtspPort, err := receiver.NewRTPBridge(rtspHost, rtspPortInt, 5000, cfg.AudioCodec)
 	if err != nil {
 		return fmt.Errorf("rtsp server start error: %w", err)
 	}
 	defer bridge.Stop()
+
+	if actualRtspPort != rtspPortInt {
+		u.Host = net.JoinHostPort(rtspHost, strconv.Itoa(actualRtspPort))
+		cfg.RTSPURL = u.String()
+	}
 
 	var isReceivingRemoteVideo atomic.Bool
 
@@ -68,16 +95,29 @@ func Run(cfg *config.Config) error {
 	pendingCandidates := make(map[string][]webrtc.ICECandidateInit)
 	var pendingCandidatesMu sync.Mutex
 
-	matches = re.FindStringSubmatch(cfg.WHIPURL)
-	if len(matches) != 2 {
-		return fmt.Errorf("whip port parse error: %w", err)
+	uw, err := url.Parse(cfg.WHIPURL)
+	if err != nil {
+		return fmt.Errorf("whip url parse error: %w", err)
 	}
-	whipPort := matches[1]
-	go func() {
-		if err := StartWHIPServer(fmt.Sprintf(":%s", whipPort), &webrtcConfig, manager, bridge, cfg); err != nil {
-			logger.Errorf("sender", "WHIP server error: %v", err)
+	whipHost, whipPort, _ := net.SplitHostPort(uw.Host)
+	if whipPort == "" {
+		if uw.Scheme == "https" {
+			whipPort = strconv.Itoa(DefaultHTTPSPort)
+		} else {
+			whipPort = strconv.Itoa(DefaultHTTPPort)
 		}
-	}()
+	}
+	whipPortInt, _ := strconv.Atoi(whipPort)
+
+	actualWhipPort, err := StartWHIPServer(whipHost, whipPortInt, &webrtcConfig, manager, bridge, cfg)
+	if err != nil {
+		logger.Errorf("sender", "WHIP server error: %v", err)
+	} else if actualWhipPort != 0 {
+		if actualWhipPort != whipPortInt {
+			uw.Host = net.JoinHostPort(whipHost, strconv.Itoa(actualWhipPort))
+			cfg.WHIPURL = uw.String()
+		}
+	}
 
 	sigClient.SetCallbacks(
 		NewOfferCallback(manager, sigClient, &webrtcConfig, conn, bridge, &isReceivingRemoteVideo, cfg, clientID),
@@ -90,6 +130,7 @@ func Run(cfg *config.Config) error {
 
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Printf("RoomID: %s\n", cfg.RoomID)
+	fmt.Printf("Input URL: %s\n", cfg.InputURL)
 	fmt.Printf("RTSP URL: %s\n", cfg.RTSPURL)
 	fmt.Printf("WHIP URL: %s\n", cfg.WHIPURL)
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
