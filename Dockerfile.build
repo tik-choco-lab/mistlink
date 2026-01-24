@@ -1,0 +1,25 @@
+FROM golang:1.23-bookworm AS builder
+
+RUN apt-get update && apt-get install -y \
+    mingw-w64 build-essential pkg-config cmake git wget autoconf libtool
+
+WORKDIR /deps
+
+RUN wget https://downloads.xiph.org/releases/opus/opus-1.4.tar.gz && \
+    tar xzf opus-1.4.tar.gz && cd opus-1.4 && \
+    ./configure --host=x86_64-w64-mingw32 --prefix=/usr/x86_64-w64-mingw32 --enable-static --disable-shared && \
+    make -j$(nproc) && make install
+
+RUN git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git && \
+    cd fdk-aac && ./autogen.sh && \
+    ./configure --host=x86_64-w64-mingw32 --prefix=/usr/x86_64-w64-mingw32 --enable-static --disable-shared && \
+    make -j$(nproc) && make install
+
+WORKDIR /app
+COPY . .
+
+ENV GOOS=windows GOARCH=amd64 CGO_ENABLED=1 \
+    CC=x86_64-w64-mingw32-gcc \
+    PKG_CONFIG_PATH=/usr/x86_64-w64-mingw32/lib/pkgconfig
+
+RUN go build -ldflags '-extldflags "-static"' -o mistlink.exe ./cmd/mistlink
