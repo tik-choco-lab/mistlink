@@ -65,8 +65,7 @@ func HandleMPEGTSStream(
 			}
 		}
 
-		shouldBridge := bridge != nil && (rtspLoopback || isReceivingRemoteVideo == nil || !isReceivingRemoteVideo.Load())
-		if shouldBridge {
+		if bridge != nil {
 			if packet.PayloadType == rtp_utils.PayloadTypeH264 {
 				receiver.ProcessVideoPacket(packet, bridge)
 			}

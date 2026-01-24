@@ -10,15 +10,15 @@ import (
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 	"github.com/tik-choco-lab/mistlink/internal/config"
-	"github.com/tik-choco-lab/mistlink/internal/domain"
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 	"github.com/tik-choco-lab/mistlink/internal/receiver"
+	"github.com/tik-choco-lab/mistlink/internal/signaling"
 	"github.com/tik-choco-lab/mistlink/internal/stream"
 	"github.com/tik-choco-lab/mistlink/internal/webrtc_utils"
 )
 
 type PeerConnectionConfigurer struct {
-	sigClient              domain.SignalingService
+	sigClient              signaling.Service
 	manager                *stream.StreamManager
 	udpConn                *net.UDPConn
 	cfg                    *config.Config
@@ -38,7 +38,7 @@ func (c *PeerConnectionConfigurer) Configure(
 		mType := track.Codec().MimeType
 		ssrc := uint32(track.SSRC())
 		pt := track.PayloadType()
-		logger.Infof("sender", "[OnTrack] Remote Track Received: %s (PT: %d, SSRC: %d)", mType, pt, ssrc)
+		logger.Debugf("sender", "[OnTrack] Remote Track Received: %s (PT: %d, SSRC: %d)", mType, pt, ssrc)
 
 		c.isReceivingRemoteVideo.Store(true)
 
@@ -172,7 +172,12 @@ func (c *PeerConnectionConfigurer) EnsureOutgoingTracks(
 	}
 	webrtc_utils.StartRTCPReadLoop(audioSender)
 
-	go HandleMPEGTSStream(c.udpConn, videoTrack, audioTrack, c.bridge, c.isReceivingRemoteVideo, c.cfg.RTSPLoopback)
+	done := make(chan struct{})
+	c.manager.RegisterCloseHandler(peerID, func() {
+		close(done)
+	})
+
+	go HandleRelayStream(c.bridge, videoTrack, audioTrack, done)
 	return nil
 }
 
@@ -183,7 +188,7 @@ func (c *PeerConnectionConfigurer) handleReconnect(peerID string) {
 	}
 
 	if c.clientID != "" && c.clientID > peerID {
-		logger.Infof("sender", "Reconnecting as initiator: %s", peerID)
+		logger.Debugf("sender", "Reconnecting as initiator: %s", peerID)
 		if err := CreatePeerConnection(peerID, c.sigClient, c.webrtcConfig, c.manager, c.udpConn, c.cfg, c.bridge, c.isReceivingRemoteVideo, c.clientID); err != nil {
 			logger.Errorf("sender", "Reconnect error: %v", err)
 		}
@@ -218,7 +223,7 @@ func (c *PeerConnectionConfigurer) cleanupPeerConnection(peerID string, pc *webr
 	if pc != nil {
 		pc.Close()
 	}
-	c.manager.RemovePeerConnection(peerID)
+	c.manager.RemovePeerConnectionMatching(peerID, pc)
 }
 
 func closeIfOpen(ch chan struct{}) {
@@ -277,8 +282,8 @@ func requestKeyFrame(pc *webrtc.PeerConnection, track *webrtc.TrackRemote) {
 		},
 	})
 	if err != nil {
-		logger.Errorf("sender", "PLI送信エラー: %v", err)
+		logger.Errorf("sender", "PLI send error: %v", err)
 	} else {
-		logger.Infof("sender", "送信側(OBS)にIDRフレームを要求しました")
+		logger.Debugf("sender", "PLI sent")
 	}
 }

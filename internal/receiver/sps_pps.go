@@ -84,11 +84,12 @@ func (b *RTPBridge) tryStartLocked() error {
 	logger.Debugf("RTSP", "Starting RTSP stream (SPS: %d bytes, PPS: %d bytes)", len(b.sps), len(b.pps))
 
 	if b.server == nil {
-		srv, err := rtspserver.StartServer(b.rtspPort, b.audioCodec)
+		srv, actualPort, err := rtspserver.StartServer(b.rtspHost, b.rtspPort, b.audioCodec)
 		if err != nil {
 			return fmt.Errorf("RTSP server start error: %w", err)
 		}
 		b.server = srv
+		b.rtspPort = actualPort
 	}
 
 	if err := b.server.InitStream(b.sps, b.pps); err != nil {

@@ -13,6 +13,8 @@ func main() {
 		room       = flag.String("room", "", "Room ID")
 		input      = flag.String("input", "", "Input source (e.g. udp://0.0.0.0:1234)")
 		server     = flag.String("server", "", "MistNet signaling server URL")
+		rtspServer = flag.String("rtsp-server", "", "RTSP server URL")
+		whipServer = flag.String("whip-server", "", "WHIP server URL")
 		debug      = flag.Bool("debug", false, "Enable debug logging")
 		showConfig = flag.Bool("show-config", false, "Show config")
 	)
@@ -50,6 +52,14 @@ func main() {
 	}
 	if *server != "" {
 		cfg.SignalingServer = *server
+	}
+
+	if *rtspServer != "" {
+		cfg.RTSPURL = *rtspServer
+	}
+
+	if *whipServer != "" {
+		cfg.WHIPURL = *whipServer
 	}
 
 	if cfg.SignalingServer == "" {

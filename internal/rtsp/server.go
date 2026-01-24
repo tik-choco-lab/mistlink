@@ -2,6 +2,9 @@ package rtsp
 
 import (
 	"fmt"
+	"net"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,8 +20,16 @@ import (
 )
 
 const (
-	SampleRate   = 48000
-	ChannelCount = 2
+	SampleRate    = 48000
+	ChannelCount  = 2
+	DefaultUDPPort = 8000
+	MaxPortRetries = 100
+)
+
+var (
+	DummySPS = []byte{0x67, 0x42, 0x00, 0x0a, 0xf8, 0x41, 0xa2}
+	DummyPPS = []byte{0x68, 0xce, 0x3c, 0x80}
+	DummyNALU = []byte{0x0c, 0xff, 0xff, 0xff}
 )
 
 type Server struct {
@@ -35,31 +46,48 @@ type Server struct {
 	aacProcessor   *AACProcessor
 }
 
-func StartServer(rtspPort int, audioCodec string) (*Server, error) {
+func StartServer(rtspHost string, rtspPort int, audioCodec string) (*Server, int, error) {
 	s := &Server{
 		closeChan:  make(chan struct{}),
 		audioCodec: audioCodec,
 	}
 
-	s.srv = &gortsplib.Server{
-		RTSPAddress:    fmt.Sprintf(":%d", rtspPort),
-		UDPRTPAddress:  ":8000",
-		UDPRTCPAddress: ":8001",
-		Handler:        s,
+	currentRTSPort := rtspPort
+	currentUDPPort := DefaultUDPPort
+
+	for {
+		bindHost := rtspHost
+		if bindHost == "localhost" {
+			bindHost = ""
+		}
+		s.srv = &gortsplib.Server{
+			RTSPAddress:    net.JoinHostPort(bindHost, strconv.Itoa(currentRTSPort)),
+			UDPRTPAddress:  net.JoinHostPort(bindHost, strconv.Itoa(currentUDPPort)),
+			UDPRTCPAddress: net.JoinHostPort(bindHost, strconv.Itoa(currentUDPPort+1)),
+			Handler:        s,
+		}
+
+		if err := s.srv.Start(); err != nil {
+			errStr := err.Error()
+			if strings.Contains(errStr, "address already in use") || strings.Contains(errStr, "bind: Only one usage") {
+				logger.Warnf("rtsp", "Port already in use (RTSP:%d, UDP:%d). Trying next...", currentRTSPort, currentUDPPort)
+				currentRTSPort++
+				currentUDPPort += 2
+				if currentRTSPort > rtspPort+MaxPortRetries {
+					return nil, 0, fmt.Errorf("RTSP server start error: too many port retries: %w", err)
+				}
+				continue
+			}
+			return nil, 0, fmt.Errorf("RTSP server start error: %w", err)
+		}
+		break
 	}
 
-	if err := s.srv.Start(); err != nil {
-		return nil, fmt.Errorf("RTSP server start error: %w", err)
-	}
-
-	dummySPS := []byte{0x67, 0x42, 0x00, 0x0a, 0xf8, 0x41, 0xa2}
-	dummyPPS := []byte{0x68, 0xce, 0x3c, 0x80}
-
-	s.initStreamInternal(dummySPS, dummyPPS, false)
+	s.initStreamInternal(DummySPS, DummyPPS, false)
 
 	go s.dummyPacketLoop()
 
-	logger.Debugf("rtsp", "RTSP server started: rtsp://localhost:%d/stream", rtspPort)
+	logger.Debugf("rtsp", "RTSP server started: rtsp://localhost:%d/stream (UDP ports: %d, %d)", currentRTSPort, currentUDPPort, currentUDPPort+1)
 
 	go func() {
 		if err := s.srv.Wait(); err != nil {
@@ -67,7 +95,7 @@ func StartServer(rtspPort int, audioCodec string) (*Server, error) {
 		}
 	}()
 
-	return s, nil
+	return s, currentRTSPort, nil
 }
 
 func (s *Server) initStreamInternal(sps []byte, pps []byte, isReal bool) {
@@ -152,7 +180,7 @@ func (s *Server) dummyPacketLoop() {
 				continue
 			}
 
-			payload := []byte{0x0c, 0xff, 0xff, 0xff}
+			payload := DummyNALU
 			pkt := &rtp.Packet{
 				Header: rtp.Header{
 					Version:        2,
