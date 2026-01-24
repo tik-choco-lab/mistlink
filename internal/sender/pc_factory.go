@@ -172,7 +172,12 @@ func (c *PeerConnectionConfigurer) EnsureOutgoingTracks(
 	}
 	webrtc_utils.StartRTCPReadLoop(audioSender)
 
-	go HandleMPEGTSStream(c.udpConn, videoTrack, audioTrack, c.bridge, c.isReceivingRemoteVideo, c.cfg.RTSPLoopback)
+	done := make(chan struct{})
+	c.manager.RegisterCloseHandler(peerID, func() {
+		close(done)
+	})
+
+	go HandleRelayStream(c.bridge, videoTrack, audioTrack, done)
 	return nil
 }
 

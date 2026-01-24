@@ -16,11 +16,13 @@ type Service interface {
 		onAnswer func(answer string, senderID string),
 		onCandidate func(candidate string, senderID string),
 		onRequest func(senderID string),
+		onRedirect func(targetID string, senderID string),
 		onDisconnect func(senderID string),
 	)
 	SendOffer(offer string, receiverID string) error
 	SendAnswer(answer string, receiverID string) error
 	SendCandidate(candidate string, receiverID string) error
 	SendRequest(receiverID string) error
+	SendRedirect(targetID string, receiverID string) error
 	Close() error
 }

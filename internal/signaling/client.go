@@ -18,6 +18,7 @@ type Client struct {
 	onAnswer     func(answer string, senderID string)
 	onCandidate  func(candidate string, senderID string)
 	onRequest    func(senderID string)
+	onRedirect   func(targetID string, senderID string)
 	onDisconnect func(senderID string)
 	onMessage    func(Message)
 }
@@ -64,6 +65,7 @@ func (c *Client) SetCallbacks(
 	onAnswer func(answer string, senderID string),
 	onCandidate func(candidate string, senderID string),
 	onRequest func(senderID string),
+	onRedirect func(targetID string, senderID string),
 	onDisconnect func(senderID string),
 ) {
 	c.mu.Lock()
@@ -72,6 +74,7 @@ func (c *Client) SetCallbacks(
 	c.onAnswer = onAnswer
 	c.onCandidate = onCandidate
 	c.onRequest = onRequest
+	c.onRedirect = onRedirect
 	c.onDisconnect = onDisconnect
 }
 
@@ -119,6 +122,17 @@ func (c *Client) SendRequest(receiverID string) error {
 	return c.sendMessage(msg)
 }
 
+func (c *Client) SendRedirect(targetID string, receiverID string) error {
+	msg := Message{
+		Type:       "Redirect",
+		Data:       targetID,
+		SenderId:   c.clientID,
+		ReceiverId: receiverID,
+		RoomId:     c.roomID,
+	}
+	return c.sendMessage(msg)
+}
+
 func (c *Client) sendMessage(msg Message) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -143,6 +157,8 @@ func (c *Client) readLoop() {
 				messageType = "answer"
 			} else if messageType == "Candidate" {
 				messageType = "candidate"
+			} else if messageType == "Redirect" {
+				messageType = "redirect"
 			}
 			go c.onMessage(Message{
 				Type:       messageType,
@@ -169,6 +185,10 @@ func (c *Client) readLoop() {
 		case "Request":
 			if c.onRequest != nil {
 				go c.onRequest(msg.SenderId)
+			}
+		case "Redirect":
+			if c.onRedirect != nil {
+				go c.onRedirect(msg.Data, msg.SenderId)
 			}
 		case "Disconnect":
 			if c.onDisconnect != nil {

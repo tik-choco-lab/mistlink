@@ -60,11 +60,13 @@ func Run(cfg *config.Config) error {
 	}
 	defer bridge.Stop()
 
+	var isReceivingRemoteVideo atomic.Bool
+
+	go HandleMPEGTSStream(conn, nil, nil, bridge, &isReceivingRemoteVideo, cfg.RTSPLoopback)
+
 	manager := stream.NewStreamManager(cfg, sigClient, bridge)
 	pendingCandidates := make(map[string][]webrtc.ICECandidateInit)
 	var pendingCandidatesMu sync.Mutex
-
-	var isReceivingRemoteVideo atomic.Bool
 
 	matches = re.FindStringSubmatch(cfg.WHIPURL)
 	if len(matches) != 2 {
@@ -82,6 +84,7 @@ func Run(cfg *config.Config) error {
 		NewAnswerCallback(manager, bridge, pendingCandidates, &pendingCandidatesMu),
 		NewCandidateCallback(manager, pendingCandidates, &pendingCandidatesMu),
 		NewConnectionCallback(manager, sigClient, &webrtcConfig, conn, bridge, &isReceivingRemoteVideo, cfg, clientID),
+		NewRedirectCallback(sigClient),
 		NewDisconnectCallback(manager),
 	)
 

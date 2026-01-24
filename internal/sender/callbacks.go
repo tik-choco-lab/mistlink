@@ -140,6 +140,22 @@ func NewCandidateCallback(
 	}
 }
 
+func NewRedirectCallback(
+	sigClient signaling.Service,
+) func(string, string) {
+	return func(targetID string, senderID string) {
+		logger.Debugf("sender", "Received Redirect from %s to target %s", senderID, targetID)
+		if targetID == "" {
+			return
+		}
+
+		logger.Debugf("sender", "Following redirect: Requesting %s", targetID)
+		if err := sigClient.SendRequest(targetID); err != nil {
+			logger.Errorf("sender", "Failed to follow redirect: %v", err)
+		}
+	}
+}
+
 func NewConnectionCallback(
 	manager *stream.StreamManager,
 	sigClient signaling.Service,
@@ -156,6 +172,19 @@ func NewConnectionCallback(
 		if clientID <= senderID {
 			logger.Debugf("sender", "[Glare Avoidance] PeerID(%s) >= MyID(%s). Skip offer.", senderID, clientID)
 			return
+			return
+		}
+
+		if manager.GetForwardReceiverCount() >= 3 {
+			target := manager.GetRandomForwardReceiver()
+			if target != "" {
+				logger.Debugf("sender", "[Tree] Max viewers reached. Redirecting %s to %s", senderID, target)
+				if err := sigClient.SendRedirect(target, senderID); err != nil {
+					logger.Errorf("sender", "SendRedirect error: %v", err)
+				}
+				return
+			}
+			logger.Warnf("sender", "[Tree] Max viewers reached but no children found. Accepting %s temporarily.", senderID)
 		}
 
 		logger.Debugf("sender", "Creating offer as initiator")
