@@ -1,0 +1,38 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      - name: Build with Docker
+        run: |
+          docker build -t mistlink-builder \
+            --build-arg APP_VERSION=${{ steps.get_version.outputs.VERSION }} \
+            -f Dockerfile.build .
+          
+          docker create --name temp-container mistlink-builder
+          docker cp temp-container:/app/mistlink.exe ./mistlink.exe
+          docker rm temp-container
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mistlink.exe
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
