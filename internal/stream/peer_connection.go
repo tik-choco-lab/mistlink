@@ -10,8 +10,27 @@ func (m *StreamManager) AddPeerConnection(id string, pc *webrtc.PeerConnection) 
 
 func (m *StreamManager) RemovePeerConnection(id string) {
 	m.pcMu.Lock()
-	defer m.pcMu.Unlock()
 	delete(m.peerConnections, id)
+	m.pcMu.Unlock()
+
+	m.fwdMu.Lock()
+	delete(m.forwardedReceivers, id)
+	m.fwdMu.Unlock()
+
+	m.broadMu.RLock()
+	for _, b := range m.broadcasters {
+		b.RemoveReceiver(id)
+	}
+	m.broadMu.RUnlock()
+
+	m.closeMu.Lock()
+	handlers := m.closeHandlers[id]
+	delete(m.closeHandlers, id)
+	m.closeMu.Unlock()
+
+	for _, h := range handlers {
+		h()
+	}
 }
 
 func (m *StreamManager) GetPeerConnection(id string) *webrtc.PeerConnection {
