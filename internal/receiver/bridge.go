@@ -10,6 +10,7 @@ import (
 )
 
 type RTPBridge struct {
+	rtspHost   string
 	rtspPort   int
 	audioCodec string
 
@@ -34,11 +35,12 @@ type RTPBridge struct {
 	nextListenerID  int
 }
 
-func NewRTPBridge(rtspPort int, bufferSize int, audioCodec string) (*RTPBridge, error) {
+func NewRTPBridge(rtspHost string, rtspPort int, bufferSize int, audioCodec string) (*RTPBridge, int, error) {
 	if bufferSize <= 0 {
 		bufferSize = 2000
 	}
 	b := &RTPBridge{
+		rtspHost:        rtspHost,
 		rtspPort:        rtspPort,
 		audioCodec:      audioCodec,
 		rtspBuffer:      NewRTSPBuffer(bufferSize),
@@ -50,15 +52,16 @@ func NewRTPBridge(rtspPort int, bufferSize int, audioCodec string) (*RTPBridge, 
 	}
 	b.wg.Add(1)
 	go b.rtpSenderLoop()
-	server, err := rtspserver.StartServer(rtspPort, audioCodec)
+	server, actualPort, err := rtspserver.StartServer(rtspHost, rtspPort, audioCodec)
 	if err != nil {
 		close(b.stopChan)
 		b.wg.Wait()
-		return nil, err
+		return nil, 0, err
 	}
 	b.server = server
+	b.rtspPort = actualPort
 	b.server.OnPlayCallback = b.RequestIDR
-	return b, nil
+	return b, actualPort, nil
 }
 
 func (b *RTPBridge) Stop() {
