@@ -5,6 +5,7 @@ import "fmt"
 const (
 	PayloadTypeH264 = 96
 	PayloadTypeOpus = 111
+	PayloadTypeAAC  = 112
 
 	VideoSSRC = 0x12345678
 	AudioSSRC = 0x87654321
