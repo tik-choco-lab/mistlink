@@ -18,7 +18,7 @@ TranscodeCtx* init_transcoder() {
     aacEncoder_SetParam(ctx->aac_enc, AACENC_SAMPLERATE, SAMPLE_RATE);
     aacEncoder_SetParam(ctx->aac_enc, AACENC_CHANNELMODE, MODE_2);
     aacEncoder_SetParam(ctx->aac_enc, AACENC_BITRATE, 128000);
-    aacEncoder_SetParam(ctx->aac_enc, AACENC_TRANSMUX, 2); // ADTS
+    aacEncoder_SetParam(ctx->aac_enc, AACENC_TRANSMUX, 0); // Raw
     aacEncEncode(ctx->aac_enc, NULL, NULL, NULL, NULL);
 
     ctx->pcm_buffer = (float *)calloc(AAC_FRAME_SIZE * CHANNELS * 2, sizeof(float));
