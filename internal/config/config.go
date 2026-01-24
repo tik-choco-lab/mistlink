@@ -23,6 +23,11 @@ type Config struct {
 	ICEServers           []webrtc.ICEServer `json:"iceservers"`
 }
 
+const (
+	AudioCodecAAC  = "aac"
+	AudioCodecOpus = "opus"
+)
+
 func DefaultConfig() *Config {
 	return &Config{
 		RoomID:               "",
@@ -33,7 +38,7 @@ func DefaultConfig() *Config {
 		RTSPLoopback:         true,
 		SPSPPSResendInterval: 1000,
 		Audio:                true,
-		AudioCodec:           "aac",
+		AudioCodec:           AudioCodecAAC,
 		ICEServers: []webrtc.ICEServer{
 			{
 				URLs: []string{"stun:stun.l.google.com:19302"},
@@ -84,9 +89,9 @@ func Load() (*Config, error) {
 		}
 	}
 
-	if config.AudioCodec != "aac" && config.AudioCodec != "opus" {
-		logger.Warnf("config", "Invalid audio codec: %s. Defaulting to aac.", config.AudioCodec)
-		config.AudioCodec = "aac"
+	if config.AudioCodec != AudioCodecAAC && config.AudioCodec != AudioCodecOpus {
+		logger.Warnf("config", "Invalid audio codec: %s. Defaulting to %s.", config.AudioCodec, AudioCodecAAC)
+		config.AudioCodec = AudioCodecAAC
 	}
 
 	return &config, nil

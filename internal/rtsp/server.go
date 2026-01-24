@@ -9,9 +9,16 @@ import (
 	"github.com/bluenviron/gortsplib/v4/pkg/base"
 	"github.com/bluenviron/gortsplib/v4/pkg/description"
 	"github.com/bluenviron/gortsplib/v4/pkg/format"
+	"github.com/bluenviron/mediacommon/pkg/codecs/mpeg4audio"
 	"github.com/pion/rtp"
+	"github.com/tik-choco-lab/mistlink/internal/config"
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 	"github.com/tik-choco-lab/mistlink/internal/rtp_utils"
+)
+
+const (
+	SampleRate   = 48000
+	ChannelCount = 2
 )
 
 type Server struct {
@@ -24,11 +31,14 @@ type Server struct {
 	closeChan      chan struct{}
 	hasRealData    bool
 	OnPlayCallback func()
+	audioCodec     string
+	aacProcessor   *AACProcessor
 }
 
-func StartServer(rtspPort int) (*Server, error) {
+func StartServer(rtspPort int, audioCodec string) (*Server, error) {
 	s := &Server{
-		closeChan: make(chan struct{}),
+		closeChan:  make(chan struct{}),
+		audioCodec: audioCodec,
 	}
 
 	s.srv = &gortsplib.Server{
@@ -83,8 +93,9 @@ func (s *Server) initStreamInternal(sps []byte, pps []byte, isReal bool) {
 		PPS:               pps,
 	}
 
-	opusFormat := &format.Opus{
-		PayloadTyp: rtp_utils.PayloadTypeOpus,
+	audioFormat, err := s.initAudioFormat()
+	if err != nil {
+		logger.Errorf("rtsp", "Audio format initialization error: %v", err)
 	}
 
 	desc := &description.Session{
@@ -95,7 +106,7 @@ func (s *Server) initStreamInternal(sps []byte, pps []byte, isReal bool) {
 			},
 			{
 				Type:    description.MediaTypeAudio,
-				Formats: []format.Format{opusFormat},
+				Formats: []format.Format{audioFormat},
 			},
 		},
 	}
@@ -182,13 +193,24 @@ func (s *Server) WritePacketRTP(pkt *rtp.Packet) error {
 		return err
 	}
 	if pkt.PayloadType == rtp_utils.PayloadTypeOpus && s.audioMedia != nil {
-		// TODO: OpusからAACに変換する
+		if s.audioCodec == config.AudioCodecAAC && s.aacProcessor != nil {
+			ok, err := s.aacProcessor.Process(pkt)
+			if err != nil {
+				logger.Warnf("rtsp", "Audio conversion error: %v", err)
+				return err
+			}
+			if !ok {
+				// Packet consumed by buffering or empty
+				return nil
+			}
+		}
+
 		err := s.stream.WritePacketRTP(s.audioMedia, pkt)
 		if err != nil {
 			logger.Warnf("rtsp", "Audio write error: %v", err)
 		} else {
 			if pkt.SequenceNumber%rtp_utils.LogIntervalPackets == 0 {
-				logger.Debugf("rtsp", "Audio packet sent: seq=%d, ts=%d", pkt.SequenceNumber, pkt.Timestamp)
+				logger.Debugf("rtsp", "Audio packet sent: seq=%d, ts=%d, pt=%d", pkt.SequenceNumber, pkt.Timestamp, pkt.PayloadType)
 			}
 		}
 		return err
@@ -210,6 +232,9 @@ func (s *Server) Close() {
 
 	if s.stream != nil {
 		s.stream.Close()
+	}
+	if s.aacProcessor != nil {
+		s.aacProcessor.Close()
 	}
 	if s.srv != nil {
 		s.srv.Close()
@@ -240,4 +265,32 @@ func (s *Server) OnPlay(ctx *gortsplib.ServerHandlerOnPlayCtx) (*base.Response, 
 		s.OnPlayCallback()
 	}
 	return &base.Response{StatusCode: base.StatusOK}, nil
+}
+
+func (s *Server) initAudioFormat() (format.Format, error) {
+	if s.audioCodec == config.AudioCodecAAC {
+		if s.aacProcessor == nil {
+			var err error
+			s.aacProcessor, err = NewAACProcessor()
+			if err != nil {
+				return nil, fmt.Errorf("failed to create AAC processor: %w", err)
+			}
+		}
+
+		return &format.MPEG4Audio{
+			PayloadTyp: rtp_utils.PayloadTypeAAC,
+			Config: &mpeg4audio.Config{
+				Type:         mpeg4audio.ObjectTypeAACLC,
+				SampleRate:   SampleRate,
+				ChannelCount: ChannelCount,
+			},
+			SizeLength:       AACSizeLength,
+			IndexLength:      AACIndexLength,
+			IndexDeltaLength: AACIndexDeltaLength,
+		}, nil
+	}
+
+	return &format.Opus{
+		PayloadTyp: rtp_utils.PayloadTypeOpus,
+	}, nil
 }

@@ -54,7 +54,7 @@ func Run(cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("rtsp port parse error: %w", err)
 	}
-	bridge, err := receiver.NewRTPBridge(rtspPortInt, 5000)
+	bridge, err := receiver.NewRTPBridge(rtspPortInt, 5000, cfg.AudioCodec)
 	if err != nil {
 		return fmt.Errorf("rtsp server start error: %w", err)
 	}
