@@ -56,6 +56,10 @@ func (b *TrackBroadcaster) AddReceiver(id string, localTrack *webrtc.TrackLocalS
 			logger.Errorf("stream", "Error sending cached PPS to %s: %v", id, err)
 		}
 	}
+
+	if b.rtcpWriter != nil {
+		go receiver.SendPLI(b.rtcpWriter, b.track.SSRC())
+	}
 }
 
 func (b *TrackBroadcaster) RemoveReceiver(id string) {
@@ -133,7 +137,8 @@ func (b *TrackBroadcaster) run() {
 		}
 		b.mu.RLock()
 		for id, localTrack := range b.receivers {
-			if err := localTrack.WriteRTP(pkt); err != nil {
+			p := pkt.Clone()
+			if err := localTrack.WriteRTP(p); err != nil {
 				logger.Errorf("stream", "Error writing to receiver %s: %v", id, err)
 			}
 		}

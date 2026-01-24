@@ -5,17 +5,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/tik-choco-lab/mistlink/internal/config"
-	"github.com/tik-choco-lab/mistlink/internal/domain"
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 )
-
-type signalingMessage struct {
-	Type       string `json:"Type"`
-	Data       string `json:"Data"`
-	SenderId   string `json:"SenderId"`
-	ReceiverId string `json:"ReceiverId"`
-	RoomId     string `json:"RoomId"`
-}
 
 type Client struct {
 	conn     *websocket.Conn
@@ -27,8 +18,9 @@ type Client struct {
 	onAnswer     func(answer string, senderID string)
 	onCandidate  func(candidate string, senderID string)
 	onRequest    func(senderID string)
+	onRedirect   func(targetID string, senderID string)
 	onDisconnect func(senderID string)
-	onMessage    func(domain.Message)
+	onMessage    func(Message)
 }
 
 func NewClient(cfg *config.Config, clientID string) (*Client, error) {
@@ -43,7 +35,7 @@ func NewClient(cfg *config.Config, clientID string) (*Client, error) {
 		clientID: clientID,
 	}
 
-	joinMsg := signalingMessage{
+	joinMsg := Message{
 		Type:     "Join",
 		RoomId:   cfg.RoomID,
 		SenderId: clientID,
@@ -53,7 +45,7 @@ func NewClient(cfg *config.Config, clientID string) (*Client, error) {
 		return nil, err
 	}
 
-	requestMsg := signalingMessage{
+	requestMsg := Message{
 		Type:     "Request",
 		RoomId:   cfg.RoomID,
 		SenderId: clientID,
@@ -73,6 +65,7 @@ func (c *Client) SetCallbacks(
 	onAnswer func(answer string, senderID string),
 	onCandidate func(candidate string, senderID string),
 	onRequest func(senderID string),
+	onRedirect func(targetID string, senderID string),
 	onDisconnect func(senderID string),
 ) {
 	c.mu.Lock()
@@ -81,11 +74,12 @@ func (c *Client) SetCallbacks(
 	c.onAnswer = onAnswer
 	c.onCandidate = onCandidate
 	c.onRequest = onRequest
+	c.onRedirect = onRedirect
 	c.onDisconnect = onDisconnect
 }
 
 func (c *Client) SendOffer(offer string, receiverID string) error {
-	msg := signalingMessage{
+	msg := Message{
 		Type:       "Offer",
 		Data:       offer,
 		SenderId:   c.clientID,
@@ -96,7 +90,7 @@ func (c *Client) SendOffer(offer string, receiverID string) error {
 }
 
 func (c *Client) SendAnswer(answer string, receiverID string) error {
-	msg := signalingMessage{
+	msg := Message{
 		Type:       "Answer",
 		Data:       answer,
 		SenderId:   c.clientID,
@@ -107,7 +101,7 @@ func (c *Client) SendAnswer(answer string, receiverID string) error {
 }
 
 func (c *Client) SendCandidate(candidate string, receiverID string) error {
-	msg := signalingMessage{
+	msg := Message{
 		Type:       "Candidate",
 		Data:       candidate,
 		SenderId:   c.clientID,
@@ -118,7 +112,7 @@ func (c *Client) SendCandidate(candidate string, receiverID string) error {
 }
 
 func (c *Client) SendRequest(receiverID string) error {
-	msg := signalingMessage{
+	msg := Message{
 		Type:       "Request",
 		Data:       "",
 		SenderId:   c.clientID,
@@ -128,7 +122,18 @@ func (c *Client) SendRequest(receiverID string) error {
 	return c.sendMessage(msg)
 }
 
-func (c *Client) sendMessage(msg signalingMessage) error {
+func (c *Client) SendRedirect(targetID string, receiverID string) error {
+	msg := Message{
+		Type:       "Redirect",
+		Data:       targetID,
+		SenderId:   c.clientID,
+		ReceiverId: receiverID,
+		RoomId:     c.roomID,
+	}
+	return c.sendMessage(msg)
+}
+
+func (c *Client) sendMessage(msg Message) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.conn.WriteJSON(msg)
@@ -136,7 +141,7 @@ func (c *Client) sendMessage(msg signalingMessage) error {
 
 func (c *Client) readLoop() {
 	for {
-		var msg signalingMessage
+		var msg Message
 		if err := c.conn.ReadJSON(&msg); err != nil {
 			logger.Errorf("signaling", "signaling read error: %v", err)
 			return
@@ -152,8 +157,10 @@ func (c *Client) readLoop() {
 				messageType = "answer"
 			} else if messageType == "Candidate" {
 				messageType = "candidate"
+			} else if messageType == "Redirect" {
+				messageType = "redirect"
 			}
-			go c.onMessage(domain.Message{
+			go c.onMessage(Message{
 				Type:       messageType,
 				Data:       msg.Data,
 				SenderId:   msg.SenderId,
@@ -179,6 +186,10 @@ func (c *Client) readLoop() {
 			if c.onRequest != nil {
 				go c.onRequest(msg.SenderId)
 			}
+		case "Redirect":
+			if c.onRedirect != nil {
+				go c.onRedirect(msg.Data, msg.SenderId)
+			}
 		case "Disconnect":
 			if c.onDisconnect != nil {
 				go c.onDisconnect(msg.SenderId)
@@ -188,21 +199,14 @@ func (c *Client) readLoop() {
 	}
 }
 
-func (c *Client) OnMessage(handler func(domain.Message)) {
+func (c *Client) OnMessage(handler func(Message)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.onMessage = handler
 }
 
-func (c *Client) Send(msg domain.Message) error {
-	sigMsg := signalingMessage{
-		Type:       msg.Type,
-		Data:       msg.Data,
-		SenderId:   msg.SenderId,
-		ReceiverId: msg.ReceiverId,
-		RoomId:     msg.RoomId,
-	}
-	return c.sendMessage(sigMsg)
+func (c *Client) Send(msg Message) error {
+	return c.sendMessage(msg)
 }
 
 func (c *Client) Close() error {

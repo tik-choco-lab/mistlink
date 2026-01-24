@@ -28,11 +28,11 @@ func ExtractSPSPPSFromSDP(sdp string, bridge *RTPBridge) {
 		sps, err1 := base64.StdEncoding.DecodeString(sets[0])
 		pps, err2 := base64.StdEncoding.DecodeString(sets[1])
 		if err1 != nil || err2 != nil || len(sps) == 0 || len(pps) == 0 {
-			logger.Warnf("receiver", "⚠️ SDP SPS/PPS decode error: %v, %v", err1, err2)
+			logger.Warnf("receiver", "SDP SPS/PPS decode error: %v, %v", err1, err2)
 			continue
 		}
 
-		logger.Infof("receiver", "📹 SDP SPS/PPS extracted: SPS=%d, PPS=%d", len(sps), len(pps))
+		logger.Debugf("receiver", "SDP SPS/PPS extracted: SPS=%d, PPS=%d", len(sps), len(pps))
 		bridge.SetSPSPPS(sps, pps)
 	}
 }

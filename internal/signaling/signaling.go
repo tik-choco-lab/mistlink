@@ -1,14 +1,14 @@
-package domain
+package signaling
 
 type Message struct {
-	Type       string
-	Data       string
-	SenderId   string
-	ReceiverId string
-	RoomId     string
+	Type       string `json:"Type"`
+	Data       string `json:"Data"`
+	SenderId   string `json:"SenderId"`
+	ReceiverId string `json:"ReceiverId"`
+	RoomId     string `json:"RoomId"`
 }
 
-type SignalingService interface {
+type Service interface {
 	Send(msg Message) error
 	OnMessage(handler func(Message))
 	SetCallbacks(
@@ -16,11 +16,13 @@ type SignalingService interface {
 		onAnswer func(answer string, senderID string),
 		onCandidate func(candidate string, senderID string),
 		onRequest func(senderID string),
+		onRedirect func(targetID string, senderID string),
 		onDisconnect func(senderID string),
 	)
 	SendOffer(offer string, receiverID string) error
 	SendAnswer(answer string, receiverID string) error
 	SendCandidate(candidate string, receiverID string) error
 	SendRequest(receiverID string) error
+	SendRedirect(targetID string, receiverID string) error
 	Close() error
 }

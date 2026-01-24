@@ -3,26 +3,14 @@ package receiver
 import (
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/pion/rtp"
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 	rtspserver "github.com/tik-choco-lab/mistlink/internal/rtsp"
 )
 
-type bufferedPacket struct {
-	pkt         *rtp.Packet
-	received    time.Time
-	payloadType uint8
-}
-
-var packetPool = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, 2048) // MTU size
-	},
-}
-
 type RTPBridge struct {
+	rtspHost   string
 	rtspPort   int
 	audioCodec string
 
@@ -36,56 +24,44 @@ type RTPBridge struct {
 	stopChan chan struct{}
 	wg       sync.WaitGroup
 
-	videoBuffer []*bufferedPacket
-	videoOrder  []uint16
-	audioBuffer []*bufferedPacket
-	audioOrder  []uint16
-	bufferMu    sync.Mutex
-	nextSeq     map[uint8]uint16
-	outgoingSeq map[uint8]uint16
-
-	lastInputTimestamp  map[uint8]uint32
-	lastOutputTimestamp map[uint8]uint32
-
-	bufferSize int
+	rtspBuffer *RTSPBuffer
 
 	activeTracks map[uint32]string // SSRC -> Type
 	pliMu        sync.Mutex
 	pliHandlers  map[uint32]func()
+
+	listenerMu      sync.RWMutex
+	packetListeners map[int]func(*rtp.Packet)
+	nextListenerID  int
 }
 
-func NewRTPBridge(rtspPort int, bufferSize int, audioCodec string) (*RTPBridge, error) {
+func NewRTPBridge(rtspHost string, rtspPort int, bufferSize int, audioCodec string) (*RTPBridge, int, error) {
 	if bufferSize <= 0 {
 		bufferSize = 2000
 	}
 	b := &RTPBridge{
-		rtspPort:            rtspPort,
-		audioCodec:          audioCodec,
-		bufferSize:          bufferSize,
-		rtpChan:             make(chan *rtp.Packet, bufferSize),
-		stopChan:            make(chan struct{}),
-		videoBuffer:         make([]*bufferedPacket, 65536),
-		videoOrder:          make([]uint16, 0, bufferSize),
-		audioBuffer:         make([]*bufferedPacket, 65536),
-		audioOrder:          make([]uint16, 0, bufferSize),
-		nextSeq:             make(map[uint8]uint16),
-		outgoingSeq:         make(map[uint8]uint16),
-		lastInputTimestamp:  make(map[uint8]uint32),
-		lastOutputTimestamp: make(map[uint8]uint32),
-		activeTracks:        make(map[uint32]string),
-		pliHandlers:         make(map[uint32]func()),
+		rtspHost:        rtspHost,
+		rtspPort:        rtspPort,
+		audioCodec:      audioCodec,
+		rtspBuffer:      NewRTSPBuffer(bufferSize),
+		rtpChan:         make(chan *rtp.Packet, bufferSize),
+		stopChan:        make(chan struct{}),
+		activeTracks:    make(map[uint32]string),
+		pliHandlers:     make(map[uint32]func()),
+		packetListeners: make(map[int]func(*rtp.Packet)),
 	}
 	b.wg.Add(1)
 	go b.rtpSenderLoop()
-	server, err := rtspserver.StartServer(rtspPort, audioCodec)
+	server, actualPort, err := rtspserver.StartServer(rtspHost, rtspPort, audioCodec)
 	if err != nil {
 		close(b.stopChan)
 		b.wg.Wait()
-		return nil, err
+		return nil, 0, err
 	}
 	b.server = server
+	b.rtspPort = actualPort
 	b.server.OnPlayCallback = b.RequestIDR
-	return b, nil
+	return b, actualPort, nil
 }
 
 func (b *RTPBridge) Stop() {
