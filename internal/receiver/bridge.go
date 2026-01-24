@@ -23,7 +23,8 @@ var packetPool = sync.Pool{
 }
 
 type RTPBridge struct {
-	rtspPort int
+	rtspPort   int
+	audioCodec string
 
 	mu      sync.Mutex
 	sps     []byte
@@ -53,12 +54,13 @@ type RTPBridge struct {
 	pliHandlers  map[uint32]func()
 }
 
-func NewRTPBridge(rtspPort int, bufferSize int) (*RTPBridge, error) {
+func NewRTPBridge(rtspPort int, bufferSize int, audioCodec string) (*RTPBridge, error) {
 	if bufferSize <= 0 {
 		bufferSize = 2000
 	}
 	b := &RTPBridge{
 		rtspPort:            rtspPort,
+		audioCodec:          audioCodec,
 		bufferSize:          bufferSize,
 		rtpChan:             make(chan *rtp.Packet, bufferSize),
 		stopChan:            make(chan struct{}),
@@ -75,7 +77,7 @@ func NewRTPBridge(rtspPort int, bufferSize int) (*RTPBridge, error) {
 	}
 	b.wg.Add(1)
 	go b.rtpSenderLoop()
-	server, err := rtspserver.StartServer(rtspPort)
+	server, err := rtspserver.StartServer(rtspPort, audioCodec)
 	if err != nil {
 		close(b.stopChan)
 		b.wg.Wait()
@@ -100,7 +102,7 @@ func (b *RTPBridge) Stop() {
 }
 
 func (b *RTPBridge) TrackStarted(ssrc uint32, mimeType string) {
-	logger.Infof("receiver", "[Bridge] Track Started: %s (SSRC: %d)", mimeType, ssrc)
+	logger.Debugf("receiver", "[Bridge] Track Started: %s (SSRC: %d)", mimeType, ssrc)
 	b.mu.Lock()
 	b.activeTracks[ssrc] = mimeType
 	b.mu.Unlock()
