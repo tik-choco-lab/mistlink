@@ -203,7 +203,7 @@ func NewDisconnectCallback(manager *stream.StreamManager) func(string) {
 		logger.Debugf("sender", "Disconnected: %s", senderID)
 		if pc := manager.GetPeerConnection(senderID); pc != nil {
 			pc.Close()
-			manager.RemovePeerConnection(senderID)
+			manager.RemovePeerConnectionMatching(senderID, pc)
 		}
 	}
 }

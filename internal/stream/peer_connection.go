@@ -13,6 +13,22 @@ func (m *StreamManager) RemovePeerConnection(id string) {
 	delete(m.peerConnections, id)
 	m.pcMu.Unlock()
 
+	m.cleanupResources(id)
+}
+
+func (m *StreamManager) RemovePeerConnectionMatching(id string, matchPC *webrtc.PeerConnection) {
+	m.pcMu.Lock()
+	if m.peerConnections[id] != matchPC {
+		m.pcMu.Unlock()
+		return
+	}
+	delete(m.peerConnections, id)
+	m.pcMu.Unlock()
+
+	m.cleanupResources(id)
+}
+
+func (m *StreamManager) cleanupResources(id string) {
 	m.fwdMu.Lock()
 	delete(m.forwardedReceivers, id)
 	m.fwdMu.Unlock()
