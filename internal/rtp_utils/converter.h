@@ -3,11 +3,12 @@
 
 #include <opus/opus.h>
 #include <fdk-aac/aacenc_lib.h>
+#include <stdint.h>
 
 typedef struct {
     OpusDecoder *opus_dec;
     HANDLE_AACENCODER aac_enc;
-    float *pcm_buffer;
+    int16_t *pcm_buffer;
     int pcm_buffer_size;
 } TranscodeCtx;
 
