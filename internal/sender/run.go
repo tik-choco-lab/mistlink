@@ -130,7 +130,6 @@ func Run(cfg *config.Config) error {
 
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Printf("RoomID: %s\n", cfg.RoomID)
-	fmt.Printf("Input URL: %s\n", cfg.InputURL)
 	fmt.Printf("RTSP URL: %s\n", cfg.RTSPURL)
 	fmt.Printf("WHIP URL: %s\n", cfg.WHIPURL)
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
