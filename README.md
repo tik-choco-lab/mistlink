@@ -19,7 +19,26 @@
 
 ## Installation
 
-Building from source is straightforward:
+### Using Docker (Recommended for Windows)
+
+The easiest way to build MistLink, especially for Windows with all CGO dependencies (Opus, FDK-AAC), is using Docker. This method will produce a `mistlink.exe` file.
+
+```bash
+# Build the builder image
+docker build -t mistlink-builder -f Dockerfile.build .
+
+# Extract the binary
+docker create --name temp-container mistlink-builder
+docker cp temp-container:/app/mistlink.exe ./mistlink.exe
+docker rm temp-container
+```
+
+### Building from Source
+
+To build from source, you need **Go 1.22+** and the following C libraries installed on your system (for CGO):
+
+-   **libopus**
+-   **fdk-aac**
 
 ```bash
 # Clone the repository
@@ -37,7 +56,7 @@ go build -o mistlink ./cmd/mistlink
 Run MistLink with a specific room ID and UDP input:
 
 ```bash
-./mistlink -room my-awesome-stream -input udp://0.0.0.0:1234
+./mistlink -room my-room-id
 ```
 
 ### Ingesting via WHIP (from OBS)
