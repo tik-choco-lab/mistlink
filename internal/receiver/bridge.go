@@ -102,7 +102,7 @@ func (b *RTPBridge) Stop() {
 }
 
 func (b *RTPBridge) TrackStarted(ssrc uint32, mimeType string) {
-	logger.Infof("receiver", "[Bridge] Track Started: %s (SSRC: %d)", mimeType, ssrc)
+	logger.Debugf("receiver", "[Bridge] Track Started: %s (SSRC: %d)", mimeType, ssrc)
 	b.mu.Lock()
 	b.activeTracks[ssrc] = mimeType
 	b.mu.Unlock()

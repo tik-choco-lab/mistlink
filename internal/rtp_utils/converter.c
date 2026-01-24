@@ -1,6 +1,7 @@
 #include "converter.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #define SAMPLE_RATE 48000
 #define CHANNELS 2
@@ -21,14 +22,14 @@ TranscodeCtx* init_transcoder() {
     aacEncoder_SetParam(ctx->aac_enc, AACENC_TRANSMUX, 0); // Raw
     aacEncEncode(ctx->aac_enc, NULL, NULL, NULL, NULL);
 
-    ctx->pcm_buffer = (float *)calloc(AAC_FRAME_SIZE * CHANNELS * 2, sizeof(float));
+    ctx->pcm_buffer = (int16_t *)calloc(AAC_FRAME_SIZE * CHANNELS * 2, sizeof(int16_t));
     ctx->pcm_buffer_size = 0;
 
     return ctx;
 }
 
 int transcode_frame(TranscodeCtx *ctx, const unsigned char *in, int in_len, unsigned char *out, int out_max) {
-    int decoded = opus_decode_float(ctx->opus_dec, in, in_len, 
+    int decoded = opus_decode(ctx->opus_dec, in, in_len, 
                                    ctx->pcm_buffer + (ctx->pcm_buffer_size * CHANNELS), 
                                    OPUS_FRAME_SIZE, 0);
     ctx->pcm_buffer_size += decoded;
@@ -38,8 +39,8 @@ int transcode_frame(TranscodeCtx *ctx, const unsigned char *in, int in_len, unsi
         AACENC_OutArgs out_args = {0};
         void *in_ptr = ctx->pcm_buffer;
         int in_id = IN_AUDIO_DATA;
-        int in_size = AAC_FRAME_SIZE * CHANNELS * sizeof(float);
-        int in_elem_size = sizeof(float);
+        int in_size = AAC_FRAME_SIZE * CHANNELS * sizeof(int16_t);
+        int in_elem_size = sizeof(int16_t);
         
         AACENC_BufDesc in_buf = { .numBufs = 1, .bufs = &in_ptr, .bufferIdentifiers = &in_id, .bufSizes = &in_size, .bufElSizes = &in_elem_size };
         
@@ -53,7 +54,7 @@ int transcode_frame(TranscodeCtx *ctx, const unsigned char *in, int in_len, unsi
         aacEncEncode(ctx->aac_enc, &in_buf, &out_buf, &in_args, &out_args);
 
         ctx->pcm_buffer_size -= AAC_FRAME_SIZE;
-        memmove(ctx->pcm_buffer, ctx->pcm_buffer + (AAC_FRAME_SIZE * CHANNELS), ctx->pcm_buffer_size * CHANNELS * sizeof(float));
+        memmove(ctx->pcm_buffer, ctx->pcm_buffer + (AAC_FRAME_SIZE * CHANNELS), ctx->pcm_buffer_size * CHANNELS * sizeof(int16_t));
 
         return out_args.numOutBytes;
     }
