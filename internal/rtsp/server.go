@@ -182,6 +182,7 @@ func (s *Server) WritePacketRTP(pkt *rtp.Packet) error {
 		return err
 	}
 	if pkt.PayloadType == rtp_utils.PayloadTypeOpus && s.audioMedia != nil {
+		// TODO: OpusからAACに変換する
 		err := s.stream.WritePacketRTP(s.audioMedia, pkt)
 		if err != nil {
 			logger.Warnf("rtsp", "Audio write error: %v", err)
