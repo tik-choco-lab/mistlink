@@ -19,6 +19,7 @@ type Config struct {
 	RTSPLoopback         bool               `json:"rtsp_loopback"`
 	SPSPPSResendInterval int                `json:"spspps_resend_interval"`
 	Audio                bool               `json:"audio"`
+	AudioCodec           string             `json:"audio_codec"`
 	ICEServers           []webrtc.ICEServer `json:"iceservers"`
 }
 
@@ -32,6 +33,7 @@ func DefaultConfig() *Config {
 		RTSPLoopback:         true,
 		SPSPPSResendInterval: 1000,
 		Audio:                true,
+		AudioCodec:           "aac",
 		ICEServers: []webrtc.ICEServer{
 			{
 				URLs: []string{"stun:stun.l.google.com:19302"},
@@ -80,6 +82,11 @@ func Load() (*Config, error) {
 		if err := Save(&config); err != nil {
 			logger.Errorf("config", "Failed to save updated config: %v", err)
 		}
+	}
+
+	if config.AudioCodec != "aac" && config.AudioCodec != "opus" {
+		logger.Warnf("config", "Invalid audio codec: %s. Defaulting to aac.", config.AudioCodec)
+		config.AudioCodec = "aac"
 	}
 
 	return &config, nil
