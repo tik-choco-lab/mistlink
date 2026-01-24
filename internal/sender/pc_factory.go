@@ -38,7 +38,7 @@ func (c *PeerConnectionConfigurer) Configure(
 		mType := track.Codec().MimeType
 		ssrc := uint32(track.SSRC())
 		pt := track.PayloadType()
-		logger.Infof("sender", "[OnTrack] Remote Track Received: %s (PT: %d, SSRC: %d)", mType, pt, ssrc)
+		logger.Debugf("sender", "[OnTrack] Remote Track Received: %s (PT: %d, SSRC: %d)", mType, pt, ssrc)
 
 		c.isReceivingRemoteVideo.Store(true)
 
@@ -183,7 +183,7 @@ func (c *PeerConnectionConfigurer) handleReconnect(peerID string) {
 	}
 
 	if c.clientID != "" && c.clientID > peerID {
-		logger.Infof("sender", "Reconnecting as initiator: %s", peerID)
+		logger.Debugf("sender", "Reconnecting as initiator: %s", peerID)
 		if err := CreatePeerConnection(peerID, c.sigClient, c.webrtcConfig, c.manager, c.udpConn, c.cfg, c.bridge, c.isReceivingRemoteVideo, c.clientID); err != nil {
 			logger.Errorf("sender", "Reconnect error: %v", err)
 		}
@@ -277,8 +277,8 @@ func requestKeyFrame(pc *webrtc.PeerConnection, track *webrtc.TrackRemote) {
 		},
 	})
 	if err != nil {
-		logger.Errorf("sender", "PLI送信エラー: %v", err)
+		logger.Errorf("sender", "PLI send error: %v", err)
 	} else {
-		logger.Infof("sender", "送信側(OBS)にIDRフレームを要求しました")
+		logger.Debugf("sender", "PLI sent")
 	}
 }
