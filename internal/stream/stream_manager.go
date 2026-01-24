@@ -5,13 +5,13 @@ import (
 
 	"github.com/pion/webrtc/v4"
 	"github.com/tik-choco-lab/mistlink/internal/config"
-	"github.com/tik-choco-lab/mistlink/internal/domain"
 	"github.com/tik-choco-lab/mistlink/internal/receiver"
+	"github.com/tik-choco-lab/mistlink/internal/signaling"
 )
 
 type StreamManager struct {
 	config    *config.Config
-	sigClient domain.SignalingService
+	sigClient signaling.Service
 	bridge    *receiver.RTPBridge
 
 	peerConnections map[string]*webrtc.PeerConnection
@@ -27,7 +27,7 @@ type StreamManager struct {
 	broadMu      sync.RWMutex
 }
 
-func NewStreamManager(cfg *config.Config, sig domain.SignalingService, bridge *receiver.RTPBridge) *StreamManager {
+func NewStreamManager(cfg *config.Config, sig signaling.Service, bridge *receiver.RTPBridge) *StreamManager {
 	return &StreamManager{
 		config:             cfg,
 		sigClient:          sig,
