@@ -5,10 +5,10 @@ import (
 	"fmt"
 
 	"github.com/pion/webrtc/v4"
-	"github.com/tik-choco-lab/mistlink/internal/domain"
+	"github.com/tik-choco-lab/mistlink/internal/signaling"
 )
 
-func CreateAndSendOffer(receiverPC *webrtc.PeerConnection, receiverID string, sigClient domain.SignalingService) error {
+func CreateAndSendOffer(receiverPC *webrtc.PeerConnection, receiverID string, sigClient signaling.Service) error {
 	newOffer, err := receiverPC.CreateOffer(nil)
 	if err != nil {
 		return fmt.Errorf("negotiation offer creation error: %w", err)

@@ -8,16 +8,16 @@ import (
 	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
 	"github.com/tik-choco-lab/mistlink/internal/config"
-	"github.com/tik-choco-lab/mistlink/internal/domain"
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 	"github.com/tik-choco-lab/mistlink/internal/receiver"
+	"github.com/tik-choco-lab/mistlink/internal/signaling"
 	"github.com/tik-choco-lab/mistlink/internal/stream"
 	"github.com/tik-choco-lab/mistlink/internal/webrtc_utils"
 )
 
 func CreatePeerConnection(
 	receiverID string,
-	sigClient domain.SignalingService,
+	sigClient signaling.Service,
 	config *webrtc.Configuration,
 	manager *stream.StreamManager,
 	udpConn *net.UDPConn,

@@ -9,15 +9,15 @@ import (
 
 	"github.com/pion/webrtc/v4"
 	"github.com/tik-choco-lab/mistlink/internal/config"
-	"github.com/tik-choco-lab/mistlink/internal/domain"
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 	"github.com/tik-choco-lab/mistlink/internal/receiver"
+	"github.com/tik-choco-lab/mistlink/internal/signaling"
 	"github.com/tik-choco-lab/mistlink/internal/stream"
 )
 
 func NewOfferCallback(
 	manager *stream.StreamManager,
-	sigClient domain.SignalingService,
+	sigClient signaling.Service,
 	webrtcConfig *webrtc.Configuration,
 	conn *net.UDPConn,
 	bridge *receiver.RTPBridge,
@@ -142,7 +142,7 @@ func NewCandidateCallback(
 
 func NewConnectionCallback(
 	manager *stream.StreamManager,
-	sigClient domain.SignalingService,
+	sigClient signaling.Service,
 	webrtcConfig *webrtc.Configuration,
 	conn *net.UDPConn,
 	bridge *receiver.RTPBridge,
