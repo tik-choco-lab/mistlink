@@ -1,6 +1,7 @@
 package signaling
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -142,7 +143,8 @@ func (c *Client) sendMessage(msg Message) error {
 	case c.sendChan <- msg:
 		return nil
 	default:
-		return logger.Errorf("signaling", "send buffer full")
+		logger.Errorf("signaling", "send buffer full")
+		return fmt.Errorf("send buffer full")
 	}
 }
 
