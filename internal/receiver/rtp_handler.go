@@ -10,6 +10,12 @@ import (
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 	"github.com/tik-choco-lab/mistlink/internal/rtp_utils"
 )
+ 
+const (
+	trackReadTimeout = 15 * time.Second
+	pliInterval      = 5 * time.Second
+	nackBitmapSize   = 16
+)
 
 func HandleTrack(track *webrtc.TrackRemote, rtcpWriter func([]rtcp.Packet) error, bridge *RTPBridge) {
 	isVideo := strings.EqualFold(track.Codec().MimeType, webrtc.MimeTypeH264)
@@ -40,7 +46,7 @@ func HandleTrack(track *webrtc.TrackRemote, rtcpWriter func([]rtcp.Packet) error
 
 	lastPLITime := time.Now()
 	for {
-		track.SetReadDeadline(time.Now().Add(15 * time.Second))
+		track.SetReadDeadline(time.Now().Add(trackReadTimeout))
 		pkt, _, err := track.ReadRTP()
 		if err != nil {
 			logger.Errorf("receiver", "Track read error: %v", err)
@@ -52,7 +58,7 @@ func HandleTrack(track *webrtc.TrackRemote, rtcpWriter func([]rtcp.Packet) error
 			if len(missing) > 0 {
 				SendNACK(rtcpWriter, track.SSRC(), missing)
 			}
-			if !bridge.IsStarted() && time.Since(lastPLITime) > 5*time.Second {
+			if !bridge.IsStarted() && time.Since(lastPLITime) > pliInterval {
 				SendPLI(rtcpWriter, track.SSRC())
 				lastPLITime = time.Now()
 			}
@@ -75,7 +81,7 @@ func ProcessVideoPacket(pkt *rtp.Packet, bridge *RTPBridge) (byte, bool) {
 		return 0, false
 	}
 
-	nalType := payload[0] & 0x1F
+	nalType := payload[0] & rtp_utils.NALMask
 	isIDR := false
 
 	switch nalType {
@@ -83,8 +89,8 @@ func ProcessVideoPacket(pkt *rtp.Packet, bridge *RTPBridge) (byte, bool) {
 		isIDR = true
 	case rtp_utils.NALTypeFUA:
 		if len(payload) > 1 {
-			orig := payload[1] & 0x1F
-			start := (payload[1] & 0x80) != 0
+			orig := payload[1] & rtp_utils.NALMask
+			start := (payload[1] & rtp_utils.FUStartMask) != 0
 			if orig == rtp_utils.NALTypeIDR && start {
 				isIDR = true
 			}
@@ -98,7 +104,7 @@ func ProcessVideoPacket(pkt *rtp.Packet, bridge *RTPBridge) (byte, bool) {
 				break
 			}
 			unit := payload[pos : pos+size]
-			if len(unit) > 0 && (unit[0]&0x1F) == rtp_utils.NALTypeIDR {
+			if len(unit) > 0 && (unit[0]&rtp_utils.NALMask) == rtp_utils.NALTypeIDR {
 				isIDR = true
 				break
 			}
@@ -129,7 +135,7 @@ func SendNACK(rtcpWriter func([]rtcp.Packet) error, ssrc webrtc.SSRC, missing []
 		j := i + 1
 		for j < len(missing) {
 			diff := missing[j] - base
-			if diff > 16 {
+			if diff > nackBitmapSize {
 				break
 			}
 			bitmap |= (1 << (diff - 1))
