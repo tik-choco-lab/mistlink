@@ -229,6 +229,15 @@ func (c *PeerConnectionConfigurer) scheduleReconnectIfStillDisconnected(peerID s
 
 func (c *PeerConnectionConfigurer) cleanupPeerConnection(peerID string, pc *webrtc.PeerConnection) {
 	if pc != nil {
+		c.incomingSSRCs.Range(func(key, value interface{}) bool {
+			ssrc, ok := key.(uint32)
+			if ok {
+				logger.Debugf("sender", "Cleaning up track SSRC: %d for peer %s", ssrc, peerID)
+				c.bridge.TrackStopped(ssrc)
+				c.incomingSSRCs.Delete(key)
+			}
+			return true
+		})
 		pc.Close()
 	}
 	c.manager.RemovePeerConnectionMatching(peerID, pc)

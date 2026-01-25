@@ -1,6 +1,7 @@
 package receiver
 
 import (
+	"net"
 	"strings"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 	"github.com/tik-choco-lab/mistlink/internal/rtp_utils"
 )
- 
+
 const (
 	trackReadTimeout = 15 * time.Second
 	pliInterval      = 5 * time.Second
@@ -49,8 +50,14 @@ func HandleTrack(track *webrtc.TrackRemote, rtcpWriter func([]rtcp.Packet) error
 		track.SetReadDeadline(time.Now().Add(trackReadTimeout))
 		pkt, _, err := track.ReadRTP()
 		if err != nil {
-			logger.Errorf("receiver", "Track read error: %v", err)
-			return
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				logger.Warnf("receiver", "Track read timeout (SSRC: %d). Retrying...", track.SSRC())
+				continue
+			}
+			
+			logger.Warnf("receiver", "Track read error: %v. Retrying in 1s... (SSRC: %d)", err, track.SSRC())
+			time.Sleep(1 * time.Second)
+			continue
 		}
 
 		if isVideo {

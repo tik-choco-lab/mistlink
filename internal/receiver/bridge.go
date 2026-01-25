@@ -97,14 +97,16 @@ func (b *RTPBridge) TrackStarted(ssrc uint32, mimeType string) {
 			b.primaryVideoSSRC = ssrc
 			logger.Debugf("receiver", "Set primary video SSRC: %d", ssrc)
 		} else if b.primaryVideoSSRC != ssrc {
-			logger.Warnf("receiver", "Ignoring additional video track SSRC: %d (Primary: %d)", ssrc, b.primaryVideoSSRC)
+			logger.Infof("receiver", "Switching primary video SSRC: %d -> %d", b.primaryVideoSSRC, ssrc)
+			b.primaryVideoSSRC = ssrc
 		}
 	} else if isAudio {
 		if b.primaryAudioSSRC == 0 {
 			b.primaryAudioSSRC = ssrc
 			logger.Debugf("receiver", "Set primary audio SSRC: %d", ssrc)
 		} else if b.primaryAudioSSRC != ssrc {
-			logger.Warnf("receiver", "Ignoring additional audio track SSRC: %d (Primary: %d)", ssrc, b.primaryAudioSSRC)
+			logger.Infof("receiver", "Switching primary audio SSRC: %d -> %d", b.primaryAudioSSRC, ssrc)
+			b.primaryAudioSSRC = ssrc
 		}
 	}
 

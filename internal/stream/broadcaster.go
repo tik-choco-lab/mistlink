@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -101,59 +102,86 @@ func (b *TrackBroadcaster) run() {
 		b.track.SetReadDeadline(time.Now().Add(5 * time.Second))
 		pkt, _, err := b.track.ReadRTP()
 		if err != nil {
-			logger.Errorf("stream", "Broadcaster read error: %v", err)
-			return
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				logger.Warnf("stream", "Broadcaster read timeout (no data). Retrying... (SSRC: %d)", b.track.SSRC())
+				continue
+			}
+			
+			logger.Warnf("stream", "Broadcaster read error: %v. Retrying in 1s... (SSRC: %d)", err, b.track.SSRC())
+			
+			select {
+			case <-time.After(1 * time.Second):
+				continue
+			case <-b.closed:
+				return
+			}
 		}
 
-		if isVideo {
-			missing := stats.checkSequenceGap(pkt.SequenceNumber)
-			if len(missing) > 0 {
-				receiver.SendNACK(b.rtcpWriter, b.track.SSRC(), missing)
-			}
-
-			bridgeStarted := false
-			if b.bridge != nil {
-				bridgeStarted = b.bridge.IsStarted()
-			}
-
-			if !bridgeStarted && time.Since(lastPLITime) > 5*time.Second {
-				receiver.SendPLI(b.rtcpWriter, b.track.SSRC())
-				lastPLITime = time.Now()
-			}
-
-			b.extractSPSPPS(pkt)
-
-			if b.bridge != nil {
-				receiver.ProcessVideoPacket(pkt, b.bridge)
-			}
-
-			pkt.PayloadType = rtp_utils.PayloadTypeH264
-		} else if isAudio {
-			pkt.PayloadType = rtp_utils.PayloadTypeOpus
-		}
-
+		b.processPacket(pkt, isVideo, isAudio, stats, &lastPLITime)
 
 		if b.bridge != nil {
 			b.bridge.WriteRTP(pkt)
 		}
 
-		if len(b.receivers) > 0 {
-			buf, err := pkt.Marshal()
-			if err != nil {
-				logger.Errorf("stream", "Packet marshal error: %v", err)
-			} else {
-				b.mu.RLock()
-				for id, localTrack := range b.receivers {
-					if _, err := localTrack.Write(buf); err != nil {
-						logger.Errorf("stream", "Error writing to receiver %s: %v", id, err)
-					}
-				}
-				b.mu.RUnlock()
-			}
+		b.broadcastToReceivers(pkt)
+	}
+}
+
+func (b *TrackBroadcaster) processPacket(
+	pkt *rtp.Packet,
+	isVideo, isAudio bool,
+	stats *trackStats,
+	lastPLITime *time.Time,
+) {
+	if isVideo {
+		missing := stats.checkSequenceGap(pkt.SequenceNumber)
+		if len(missing) > 0 {
+			receiver.SendNACK(b.rtcpWriter, b.track.SSRC(), missing)
 		}
 
-		stats.packetCount++
-		stats.logIfTime(isVideo)
+		bridgeStarted := false
+		if b.bridge != nil {
+			bridgeStarted = b.bridge.IsStarted()
+		}
+
+		if !bridgeStarted && time.Since(*lastPLITime) > 5*time.Second {
+			receiver.SendPLI(b.rtcpWriter, b.track.SSRC())
+			*lastPLITime = time.Now()
+		}
+
+		b.extractSPSPPS(pkt)
+
+		if b.bridge != nil {
+			receiver.ProcessVideoPacket(pkt, b.bridge)
+		}
+
+		pkt.PayloadType = rtp_utils.PayloadTypeH264
+	} else if isAudio {
+		pkt.PayloadType = rtp_utils.PayloadTypeOpus
+	}
+
+	stats.packetCount++
+	stats.logIfTime(isVideo)
+}
+
+func (b *TrackBroadcaster) broadcastToReceivers(pkt *rtp.Packet) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if len(b.receivers) == 0 {
+		return
+	}
+
+	buf, err := pkt.Marshal()
+	if err != nil {
+		logger.Errorf("stream", "Packet marshal error: %v", err)
+		return
+	}
+
+	for id, localTrack := range b.receivers {
+		if _, err := localTrack.Write(buf); err != nil {
+			logger.Errorf("stream", "Error writing to receiver %s: %v", id, err)
+		}
 	}
 }
 
@@ -163,7 +191,7 @@ func (b *TrackBroadcaster) extractSPSPPS(pkt *rtp.Packet) {
 		return
 	}
 
-	nalType := payload[0] & 0x1F
+	nalType := payload[0] & rtp_utils.NALMask
 
 	if nalType == rtp_utils.NALTypeSTAPA {
 		pos := 1
@@ -175,7 +203,7 @@ func (b *TrackBroadcaster) extractSPSPPS(pkt *rtp.Packet) {
 			}
 			unit := payload[pos : pos+size]
 			if len(unit) > 0 {
-				unitType := unit[0] & 0x1F
+				unitType := unit[0] & rtp_utils.NALMask
 				if unitType == rtp_utils.NALTypeSPS {
 					b.sps = append([]byte(nil), unit...)
 				} else if unitType == rtp_utils.NALTypePPS {
