@@ -60,6 +60,7 @@ func (b *RTPBridge) rtpSenderLoop() {
 		select {
 		case pkt := <-b.rtpChan:
 			b.rtspBuffer.Add(pkt)
+			b.flushBufferedPackets()
 
 		case <-ticker.C:
 			b.flushBufferedPackets()
