@@ -12,6 +12,7 @@ type Client struct {
 	conn     *websocket.Conn
 	roomID   string
 	clientID string
+	sendChan chan Message
 	mu       sync.Mutex
 
 	onOffer      func(offer string, senderID string)
@@ -33,7 +34,10 @@ func NewClient(cfg *config.Config, clientID string) (*Client, error) {
 		conn:     conn,
 		roomID:   cfg.RoomID,
 		clientID: clientID,
+		sendChan: make(chan Message, 256),
 	}
+
+	go client.writePump()
 
 	joinMsg := Message{
 		Type:     "Join",
@@ -134,9 +138,21 @@ func (c *Client) SendRedirect(targetID string, receiverID string) error {
 }
 
 func (c *Client) sendMessage(msg Message) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.conn.WriteJSON(msg)
+	select {
+	case c.sendChan <- msg:
+		return nil
+	default:
+		return logger.Errorf("signaling", "send buffer full")
+	}
+}
+
+func (c *Client) writePump() {
+	for msg := range c.sendChan {
+		if err := c.conn.WriteJSON(msg); err != nil {
+			logger.Errorf("signaling", "write error: %v", err)
+			return
+		}
+	}
 }
 
 func (c *Client) readLoop() {
@@ -211,9 +227,11 @@ func (c *Client) Send(msg Message) error {
 
 func (c *Client) Close() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn != nil {
-		return c.conn.Close()
+	conn := c.conn
+	c.mu.Unlock()
+	
+	if conn != nil {
+		return conn.Close()
 	}
 	return nil
 }
