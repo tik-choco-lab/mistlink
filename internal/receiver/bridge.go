@@ -1,8 +1,10 @@
 package receiver
 
 import (
+	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pion/rtp"
 	"github.com/tik-choco-lab/mistlink/internal/logger"
@@ -38,8 +40,10 @@ type RTPBridge struct {
 	packetListeners map[int]func(*rtp.Packet)
 	nextListenerID  int
 
-	primaryVideoSSRC uint32
-	primaryAudioSSRC uint32
+	primaryVideoSSRC   uint32
+	primaryAudioSSRC   uint32
+	activeVideoTrackID string
+	activeAudioTrackID string
 }
 
 func NewRTPBridge(rtspHost string, rtspPort int, bufferSize int, audioCodec string) (*RTPBridge, int, error) {
@@ -84,10 +88,13 @@ func (b *RTPBridge) Stop() {
 	b.started = false
 }
 
-func (b *RTPBridge) TrackStarted(ssrc uint32, mimeType string) {
+func (b *RTPBridge) TrackStarted(ssrc uint32, mimeType string) string {
 	logger.Debugf("receiver", "[Bridge] Track Started: %s (SSRC: %d)", mimeType, ssrc)
 	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	b.activeTracks[ssrc] = mimeType
+	trackID := fmt.Sprintf("%d_%d", ssrc, time.Now().UnixNano())
 
 	isAudio := strings.EqualFold(mimeType, "audio/opus") || strings.EqualFold(mimeType, "audio/aac")
 	isVideo := strings.HasPrefix(strings.ToLower(mimeType), "video/") && (strings.Contains(strings.ToLower(mimeType), "h264") || strings.Contains(strings.ToLower(mimeType), "avc"))
@@ -95,24 +102,32 @@ func (b *RTPBridge) TrackStarted(ssrc uint32, mimeType string) {
 	if isVideo {
 		if b.primaryVideoSSRC == 0 {
 			b.primaryVideoSSRC = ssrc
-			logger.Debugf("receiver", "Set primary video SSRC: %d", ssrc)
+			b.activeVideoTrackID = trackID
+			logger.Debugf("receiver", "Set primary video SSRC: %d, TrackID: %s", ssrc, trackID)
 		} else if b.primaryVideoSSRC != ssrc {
 			logger.Warnf("receiver", "Ignoring additional video track SSRC: %d (Primary: %d)", ssrc, b.primaryVideoSSRC)
+		} else {
+			b.activeVideoTrackID = trackID
+			logger.Debugf("receiver", "Updated primary video TrackID: %s for SSRC: %d", trackID, ssrc)
 		}
 	} else if isAudio {
 		if b.primaryAudioSSRC == 0 {
 			b.primaryAudioSSRC = ssrc
-			logger.Debugf("receiver", "Set primary audio SSRC: %d", ssrc)
+			b.activeAudioTrackID = trackID
+			logger.Debugf("receiver", "Set primary audio SSRC: %d, TrackID: %s", ssrc, trackID)
 		} else if b.primaryAudioSSRC != ssrc {
 			logger.Warnf("receiver", "Ignoring additional audio track SSRC: %d (Primary: %d)", ssrc, b.primaryAudioSSRC)
+		} else {
+			b.activeAudioTrackID = trackID
+			logger.Debugf("receiver", "Updated primary audio TrackID: %s for SSRC: %d", trackID, ssrc)
 		}
 	}
 
-	b.mu.Unlock()
-
 	if isVideo {
-		b.RequestIDR()
+		go b.RequestIDR()
 	}
+	
+	return trackID
 }
 
 func (b *RTPBridge) RegisterPLIHandler(ssrc uint32, handler func()) {
@@ -140,17 +155,27 @@ func (b *RTPBridge) IsStarted() bool {
 	return b.started
 }
 
-func (b *RTPBridge) TrackStopped(ssrc uint32) {
+func (b *RTPBridge) TrackStopped(ssrc uint32, trackID string) {
 	b.mu.Lock()
 	delete(b.activeTracks, ssrc)
 
 	if b.primaryVideoSSRC == ssrc {
-		b.primaryVideoSSRC = 0
-		logger.Debugf("receiver", "Primary video SSRC stopped: %d", ssrc)
+		if b.activeVideoTrackID == trackID {
+			b.primaryVideoSSRC = 0
+			b.activeVideoTrackID = ""
+			logger.Debugf("receiver", "Primary video SSRC stopped: %d (ID: %s)", ssrc, trackID)
+		} else {
+			logger.Debugf("receiver", "Old video track stopped: %d (ID: %s), current active: %s", ssrc, trackID, b.activeVideoTrackID)
+		}
 	}
 	if b.primaryAudioSSRC == ssrc {
-		b.primaryAudioSSRC = 0
-		logger.Debugf("receiver", "Primary audio SSRC stopped: %d", ssrc)
+		if b.activeAudioTrackID == trackID {
+			b.primaryAudioSSRC = 0
+			b.activeAudioTrackID = ""
+			logger.Debugf("receiver", "Primary audio SSRC stopped: %d (ID: %s)", ssrc, trackID)
+		} else {
+			logger.Debugf("receiver", "Old audio track stopped: %d (ID: %s), current active: %s", ssrc, trackID, b.activeAudioTrackID)
+		}
 	}
 
 	b.mu.Unlock()

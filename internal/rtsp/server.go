@@ -44,6 +44,7 @@ type Server struct {
 	OnPlayCallback func()
 	audioCodec     string
 	aacProcessor   *AACProcessor
+	activeClientCount int
 }
 
 func StartServer(rtspHost string, rtspPort int, audioCodec string) (*Server, int, error) {
@@ -160,7 +161,11 @@ func (s *Server) StopRealData() {
 }
 
 func (s *Server) dummyPacketLoop() {
-	ticker := time.NewTicker(100 * time.Millisecond)
+	defaultInterval := 100 * time.Millisecond
+	activeInterval := 500 * time.Millisecond
+	currentInterval := defaultInterval
+
+	ticker := time.NewTicker(currentInterval)
 	defer ticker.Stop()
 
 	var seq uint16
@@ -174,7 +179,19 @@ func (s *Server) dummyPacketLoop() {
 			hasReal := s.hasRealData
 			stream := s.stream
 			videoMedia := s.videoMedia
+			clientCount := s.activeClientCount
 			s.mutex.RUnlock()
+
+			targetInterval := defaultInterval
+			if clientCount > 0 {
+				targetInterval = activeInterval
+			}
+
+			if currentInterval != targetInterval {
+				currentInterval = targetInterval
+				ticker.Reset(currentInterval)
+				logger.Debugf("rtsp", "Dummy packet interval adjusted to %v (Active clients: %d)", currentInterval, clientCount)
+			}
 
 			if hasReal || stream == nil || videoMedia == nil {
 				continue
@@ -289,10 +306,24 @@ func (s *Server) OnSetup(ctx *gortsplib.ServerHandlerOnSetupCtx) (*base.Response
 
 func (s *Server) OnPlay(ctx *gortsplib.ServerHandlerOnPlayCtx) (*base.Response, error) {
 	logger.Debugf("rtsp", "Client started playing: %s", ctx.Path)
+	
+	s.mutex.Lock()
+	s.activeClientCount++
+	s.mutex.Unlock()
+	
 	if s.OnPlayCallback != nil {
 		s.OnPlayCallback()
 	}
 	return &base.Response{StatusCode: base.StatusOK}, nil
+}
+
+func (s *Server) OnSessionClose(ctx *gortsplib.ServerHandlerOnSessionCloseCtx) {
+	logger.Debugf("rtsp", "Client session closed")
+	s.mutex.Lock()
+	if s.activeClientCount > 0 {
+		s.activeClientCount--
+	}
+	s.mutex.Unlock()
 }
 
 func (s *Server) initAudioFormat() (format.Format, error) {

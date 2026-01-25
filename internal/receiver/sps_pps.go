@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/tik-choco-lab/mistlink/internal/logger"
+	"github.com/tik-choco-lab/mistlink/internal/rtp_utils"
 	rtspserver "github.com/tik-choco-lab/mistlink/internal/rtsp"
 )
 
@@ -21,21 +22,28 @@ func (b *RTPBridge) SetSPSPPS(sps []byte, pps []byte) {
 	_ = b.tryStartLocked()
 }
 
-func (b *RTPBridge) ExtractSPSPPS(payload []byte, nalType byte) {
+func (b *RTPBridge) ExtractSPSPPS(payload []byte, nalType byte, trackID string) {
+	b.mu.Lock()
+	activeID := b.activeVideoTrackID
+	b.mu.Unlock()
+
+	if trackID != activeID {
+		return
+	}
 	if len(payload) == 0 {
 		return
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
+
+	var foundSPS, foundPPS []byte
 
 	switch nalType {
-	case 7: // SPS
+	case rtp_utils.NALTypeSPS:
 		logger.Debugf("RTSP", "Received SPS NAL: %d bytes", len(payload))
-		b.sps = append([]byte{}, payload...)
-	case 8: // PPS
+		foundSPS = append([]byte{}, payload...)
+	case rtp_utils.NALTypePPS:
 		logger.Debugf("RTSP", "Received PPS NAL: %d bytes", len(payload))
-		b.pps = append([]byte{}, payload...)
-	case 24: // STAP-A
+		foundPPS = append([]byte{}, payload...)
+	case rtp_utils.NALTypeSTAPA:
 		pos := 1
 		for pos+2 <= len(payload) {
 			size := int(payload[pos])<<8 | int(payload[pos+1])
@@ -45,29 +53,31 @@ func (b *RTPBridge) ExtractSPSPPS(payload []byte, nalType byte) {
 			}
 			unit := payload[pos : pos+size]
 			if len(unit) > 0 {
-				nt := unit[0] & 0x1F
-				if nt == 7 && len(b.sps) == 0 {
-					b.sps = append([]byte{}, unit...)
-				} else if nt == 8 && len(b.pps) == 0 {
-					b.pps = append([]byte{}, unit...)
+				nt := unit[0] & rtp_utils.NALMask
+				if nt == rtp_utils.NALTypeSPS && len(foundSPS) == 0 {
+					foundSPS = append([]byte{}, unit...)
+				} else if nt == rtp_utils.NALTypePPS && len(foundPPS) == 0 {
+					foundPPS = append([]byte{}, unit...)
 				}
 			}
 			pos += size
 		}
-	case 28: // FU-A
-		if len(payload) > 1 && (payload[1]&0x80) != 0 {
-			orig := payload[1] & 0x1F
-			if orig == 7 && len(b.sps) == 0 {
+	case rtp_utils.NALTypeFUA:
+		if len(payload) > 1 && (payload[1]&rtp_utils.FUStartMask) != 0 {
+			orig := payload[1] & rtp_utils.NALMask
+			if orig == rtp_utils.NALTypeSPS {
 				unit := append([]byte{(payload[0] & 0xE0) | orig}, payload[2:]...)
-				b.sps = append([]byte{}, unit...)
-			} else if orig == 8 && len(b.pps) == 0 {
+				foundSPS = append([]byte{}, unit...)
+			} else if orig == rtp_utils.NALTypePPS {
 				unit := append([]byte{(payload[0] & 0xE0) | orig}, payload[2:]...)
-				b.pps = append([]byte{}, unit...)
+				foundPPS = append([]byte{}, unit...)
 			}
 		}
 	}
 
-	_ = b.tryStartLocked()
+	if len(foundSPS) > 0 || len(foundPPS) > 0 {
+		b.SetSPSPPS(foundSPS, foundPPS)
+	}
 }
 
 func (b *RTPBridge) tryStartLocked() error {

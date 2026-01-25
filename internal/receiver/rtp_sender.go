@@ -11,10 +11,10 @@ const (
 	flushInterval = 50 * time.Millisecond
 )
 
-func (b *RTPBridge) WriteRTP(pkt *rtp.Packet) {
+func (b *RTPBridge) WriteRTP(pkt *rtp.Packet, trackID string) {
 	b.mu.Lock()
 	allowed := false
-	if (b.primaryVideoSSRC != 0 && pkt.SSRC == b.primaryVideoSSRC) || (b.primaryAudioSSRC != 0 && pkt.SSRC == b.primaryAudioSSRC) {
+	if (b.activeVideoTrackID != "" && trackID == b.activeVideoTrackID) || (b.activeAudioTrackID != "" && trackID == b.activeAudioTrackID) {
 		allowed = true
 	}
 	started := b.started
@@ -53,13 +53,51 @@ func (b *RTPBridge) WriteRTP(pkt *rtp.Packet) {
 func (b *RTPBridge) rtpSenderLoop() {
 	defer b.wg.Done()
 
-	ticker := time.NewTicker(flushInterval)
+	const (
+		minInterval = 10 * time.Millisecond
+		maxInterval = 100 * time.Millisecond
+		checkWindow = 1 * time.Second
+	)
+
+	currentInterval := flushInterval
+	ticker := time.NewTicker(currentInterval)
 	defer ticker.Stop()
+
+	checkTicker := time.NewTicker(checkWindow)
+	defer checkTicker.Stop()
+
+	packetCount := 0
 
 	for {
 		select {
 		case pkt := <-b.rtpChan:
 			b.rtspBuffer.Add(pkt)
+			b.flushBufferedPackets()
+			packetCount++
+
+		case <-checkTicker.C:
+			pps := packetCount
+			packetCount = 0
+
+			var newInterval time.Duration
+			if pps > 0 {
+				calculated := time.Duration(1000/pps/2) * time.Millisecond
+				if calculated < minInterval {
+					newInterval = minInterval
+				} else if calculated > maxInterval {
+					newInterval = maxInterval
+				} else {
+					newInterval = calculated
+				}
+			} else {
+				newInterval = maxInterval
+			}
+
+			if newInterval != currentInterval {
+				currentInterval = newInterval
+				ticker.Reset(currentInterval)
+				logger.Debugf("RTSP", "Adaptive buffering: PPS=%d, NewInterval=%v", pps, currentInterval)
+			}
 
 		case <-ticker.C:
 			b.flushBufferedPackets()
