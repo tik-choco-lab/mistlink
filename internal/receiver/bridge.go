@@ -8,6 +8,10 @@ import (
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 	rtspserver "github.com/tik-choco-lab/mistlink/internal/rtsp"
 )
+ 
+const (
+	defaultBufferSize = 2000
+)
 
 type RTPBridge struct {
 	rtspHost   string
@@ -40,7 +44,7 @@ type RTPBridge struct {
 
 func NewRTPBridge(rtspHost string, rtspPort int, bufferSize int, audioCodec string) (*RTPBridge, int, error) {
 	if bufferSize <= 0 {
-		bufferSize = 2000
+		bufferSize = defaultBufferSize
 	}
 	b := &RTPBridge{
 		rtspHost:        rtspHost,
