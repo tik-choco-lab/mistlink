@@ -11,10 +11,10 @@ const (
 	flushInterval = 50 * time.Millisecond
 )
 
-func (b *RTPBridge) WriteRTP(pkt *rtp.Packet) {
+func (b *RTPBridge) WriteRTP(pkt *rtp.Packet, trackID string) {
 	b.mu.Lock()
 	allowed := false
-	if (b.primaryVideoSSRC != 0 && pkt.SSRC == b.primaryVideoSSRC) || (b.primaryAudioSSRC != 0 && pkt.SSRC == b.primaryAudioSSRC) {
+	if (b.activeVideoTrackID != "" && trackID == b.activeVideoTrackID) || (b.activeAudioTrackID != "" && trackID == b.activeAudioTrackID) {
 		allowed = true
 	}
 	started := b.started
