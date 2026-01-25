@@ -1,6 +1,7 @@
 package receiver
 
 import (
+	"io"
 	"net"
 	"strings"
 	"time"
@@ -33,8 +34,8 @@ func HandleTrack(track *webrtc.TrackRemote, rtcpWriter func([]rtcp.Packet) error
 		})
 	}
 
-	bridge.TrackStarted(ssrc, track.Codec().MimeType)
-	defer bridge.TrackStopped(ssrc)
+	trackID := bridge.TrackStarted(ssrc, track.Codec().MimeType)
+	defer bridge.TrackStopped(ssrc, trackID)
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -55,9 +56,13 @@ func HandleTrack(track *webrtc.TrackRemote, rtcpWriter func([]rtcp.Packet) error
 				continue
 			}
 			
-			logger.Warnf("receiver", "Track read error: %v. Retrying in 1s... (SSRC: %d)", err, track.SSRC())
-			time.Sleep(1 * time.Second)
-			continue
+			if err == io.EOF {
+				logger.Debugf("receiver", "Track EOF (SSRC: %d)", track.SSRC())
+				return
+			}
+			
+			logger.Warnf("receiver", "Track read error: %v. Stopping... (SSRC: %d)", err, track.SSRC())
+			return
 		}
 
 		if isVideo {
@@ -69,20 +74,20 @@ func HandleTrack(track *webrtc.TrackRemote, rtcpWriter func([]rtcp.Packet) error
 				SendPLI(rtcpWriter, track.SSRC())
 				lastPLITime = time.Now()
 			}
-			nalType, isIDR := ProcessVideoPacket(pkt, bridge)
+			nalType, isIDR := ProcessVideoPacket(uint32(track.SSRC()), trackID, pkt, bridge)
 			stats.updateNALStats(nalType, isIDR)
 			pkt.PayloadType = rtp_utils.PayloadTypeH264
 		} else if isAudio {
 			pkt.PayloadType = rtp_utils.PayloadTypeOpus
 		}
 
-		bridge.WriteRTP(pkt)
+		bridge.WriteRTP(pkt, trackID)
 		stats.packetCount++
 		stats.logIfTime(isVideo)
 	}
 }
 
-func ProcessVideoPacket(pkt *rtp.Packet, bridge *RTPBridge) (byte, bool) {
+func ProcessVideoPacket(ssrc uint32, trackID int, pkt *rtp.Packet, bridge *RTPBridge) (byte, bool) {
 	payload := pkt.Payload
 	if len(payload) == 0 {
 		return 0, false
@@ -123,7 +128,7 @@ func ProcessVideoPacket(pkt *rtp.Packet, bridge *RTPBridge) (byte, bool) {
 		logger.Debugf("receiver", "IDR Frame: ts=%d, seq=%d", pkt.Timestamp, pkt.SequenceNumber)
 	}
 
-	bridge.ExtractSPSPPS(payload, nalType)
+	bridge.ExtractSPSPPS(ssrc, trackID, payload, nalType)
 	return nalType, isIDR
 }
 

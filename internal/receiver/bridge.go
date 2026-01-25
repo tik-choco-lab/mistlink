@@ -30,7 +30,7 @@ type RTPBridge struct {
 
 	rtspBuffer *RTSPBuffer
 
-	activeTracks map[uint32]string // SSRC -> Type
+	activeTracks map[uint32]int // SSRC -> TrackID
 	pliMu        sync.Mutex
 	pliHandlers  map[uint32]func()
 
@@ -53,7 +53,7 @@ func NewRTPBridge(rtspHost string, rtspPort int, bufferSize int, audioCodec stri
 		rtspBuffer:      NewRTSPBuffer(bufferSize),
 		rtpChan:         make(chan *rtp.Packet, bufferSize),
 		stopChan:        make(chan struct{}),
-		activeTracks:    make(map[uint32]string),
+		activeTracks:    make(map[uint32]int),
 		pliHandlers:     make(map[uint32]func()),
 		packetListeners: make(map[int]func(*rtp.Packet)),
 	}
@@ -84,37 +84,41 @@ func (b *RTPBridge) Stop() {
 	b.started = false
 }
 
-func (b *RTPBridge) TrackStarted(ssrc uint32, mimeType string) {
+func (b *RTPBridge) TrackStarted(ssrc uint32, mimeType string) int {
 	logger.Debugf("receiver", "[Bridge] Track Started: %s (SSRC: %d)", mimeType, ssrc)
 	b.mu.Lock()
-	b.activeTracks[ssrc] = mimeType
+	defer b.mu.Unlock()
+
+	b.nextListenerID++
+	trackID := b.nextListenerID
+	// Always update trackID to the latest one, effectively "restarting" the track for the bridge
+	b.activeTracks[ssrc] = trackID
 
 	isAudio := strings.EqualFold(mimeType, "audio/opus") || strings.EqualFold(mimeType, "audio/aac")
 	isVideo := strings.HasPrefix(strings.ToLower(mimeType), "video/") && (strings.Contains(strings.ToLower(mimeType), "h264") || strings.Contains(strings.ToLower(mimeType), "avc"))
 
 	if isVideo {
-		if b.primaryVideoSSRC == 0 {
-			b.primaryVideoSSRC = ssrc
-			logger.Debugf("receiver", "Set primary video SSRC: %d", ssrc)
-		} else if b.primaryVideoSSRC != ssrc {
-			logger.Infof("receiver", "Switching primary video SSRC: %d -> %d", b.primaryVideoSSRC, ssrc)
-			b.primaryVideoSSRC = ssrc
+		// Just overwrite primary video SSRC. If it was different, we switch. If same, we update ID (implicitly via activeTracks map check in WriteRTP)
+		if b.primaryVideoSSRC != ssrc {
+			logger.Infof("receiver", "Switching primary video SSRC: %d -> %d (ID: %d)", b.primaryVideoSSRC, ssrc, trackID)
+		} else {
+			logger.Debugf("receiver", "Updating primary video track ID: %d (SSRC: %d)", trackID, ssrc)
 		}
+		b.primaryVideoSSRC = ssrc
 	} else if isAudio {
-		if b.primaryAudioSSRC == 0 {
-			b.primaryAudioSSRC = ssrc
-			logger.Debugf("receiver", "Set primary audio SSRC: %d", ssrc)
-		} else if b.primaryAudioSSRC != ssrc {
-			logger.Infof("receiver", "Switching primary audio SSRC: %d -> %d", b.primaryAudioSSRC, ssrc)
-			b.primaryAudioSSRC = ssrc
+		if b.primaryAudioSSRC != ssrc {
+			logger.Infof("receiver", "Switching primary audio SSRC: %d -> %d (ID: %d)", b.primaryAudioSSRC, ssrc, trackID)
+		} else {
+			logger.Debugf("receiver", "Updating primary audio track ID: %d (SSRC: %d)", trackID, ssrc)
 		}
+		b.primaryAudioSSRC = ssrc
 	}
-
-	b.mu.Unlock()
 
 	if isVideo {
-		b.RequestIDR()
+		go b.RequestIDR()
 	}
+
+	return trackID
 }
 
 func (b *RTPBridge) RegisterPLIHandler(ssrc uint32, handler func()) {
@@ -142,35 +146,35 @@ func (b *RTPBridge) IsStarted() bool {
 	return b.started
 }
 
-func (b *RTPBridge) TrackStopped(ssrc uint32) {
+func (b *RTPBridge) TrackStopped(ssrc uint32, trackID int) {
 	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	currentID, exists := b.activeTracks[ssrc]
+	if !exists || currentID != trackID {
+		logger.Warnf("receiver", "TrackStopped ignored for SSRC %d (ID: %d, Current: %d)", ssrc, trackID, currentID)
+		return
+	}
+
 	delete(b.activeTracks, ssrc)
 
 	if b.primaryVideoSSRC == ssrc {
 		b.primaryVideoSSRC = 0
-		logger.Debugf("receiver", "Primary video SSRC stopped: %d", ssrc)
+		logger.Debugf("receiver", "Primary video SSRC stopped: %d (ID: %d)", ssrc, trackID)
 	}
 	if b.primaryAudioSSRC == ssrc {
 		b.primaryAudioSSRC = 0
-		logger.Debugf("receiver", "Primary audio SSRC stopped: %d", ssrc)
+		logger.Debugf("receiver", "Primary audio SSRC stopped: %d (ID: %d)", ssrc, trackID)
 	}
 
-	b.mu.Unlock()
-
-	b.pliMu.Lock()
-	delete(b.pliHandlers, ssrc)
-	b.pliMu.Unlock()
-
-	b.mu.Lock()
 	if len(b.activeTracks) == 0 {
 		if b.server != nil {
-			b.server.StopRealData()
+			go b.server.StopRealData()
 		}
 		b.started = false
 		b.sps = nil
 		b.pps = nil
 	}
-	b.mu.Unlock()
 }
 
 func (b *RTPBridge) StopChan() <-chan struct{} {

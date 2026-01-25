@@ -22,7 +22,14 @@ func (b *RTPBridge) SetSPSPPS(sps []byte, pps []byte) {
 	_ = b.tryStartLocked()
 }
 
-func (b *RTPBridge) ExtractSPSPPS(payload []byte, nalType byte) {
+func (b *RTPBridge) ExtractSPSPPS(ssrc uint32, trackID int, payload []byte, nalType byte) {
+	b.mu.Lock()
+	if currentID, ok := b.activeTracks[ssrc]; !ok || currentID != trackID {
+		b.mu.Unlock()
+		return
+	}
+	b.mu.Unlock()
+
 	if len(payload) == 0 {
 		return
 	}

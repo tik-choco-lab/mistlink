@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -12,6 +13,11 @@ import (
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 	"github.com/tik-choco-lab/mistlink/internal/receiver"
 	"github.com/tik-choco-lab/mistlink/internal/rtp_utils"
+)
+
+const (
+	broadcasterReadTimeout   = 5 * time.Second
+	bridgeStartupCheckWindow = 15 * time.Second
 )
 
 type TrackBroadcaster struct {
@@ -47,15 +53,32 @@ func (b *TrackBroadcaster) AddReceiver(id string, localTrack *webrtc.TrackLocalS
 	defer b.mu.Unlock()
 	b.receivers[id] = localTrack
 
-	if len(b.sps) > 0 {
-		if _, err := localTrack.Write(b.sps); err != nil {
-			logger.Errorf("stream", "Error sending cached SPS to %s: %v", id, err)
+	sendCachedNAL := func(nal []byte) {
+		pkt := &rtp.Packet{
+			Header: rtp.Header{
+				Version:     2,
+				PayloadType: rtp_utils.PayloadTypeH264,
+				SSRC:        uint32(b.track.SSRC()),
+			},
+			Payload: nal,
+		}
+		
+		buf, err := pkt.Marshal()
+		if err != nil {
+			logger.Errorf("stream", "Failed to marshal cached NAL: %v", err)
+			return
+		}
+
+		if _, err := localTrack.Write(buf); err != nil {
+			logger.Errorf("stream", "Error sending cached NAL to %s: %v", id, err)
 		}
 	}
+
+	if len(b.sps) > 0 {
+		sendCachedNAL(b.sps)
+	}
 	if len(b.pps) > 0 {
-		if _, err := localTrack.Write(b.pps); err != nil {
-			logger.Errorf("stream", "Error sending cached PPS to %s: %v", id, err)
-		}
+		sendCachedNAL(b.pps)
 	}
 
 	if b.rtcpWriter != nil {
@@ -82,9 +105,10 @@ func (b *TrackBroadcaster) run() {
 	}
 
 	ssrc := uint32(b.track.SSRC())
+	var trackID int
 	if b.bridge != nil {
-		b.bridge.TrackStarted(ssrc, b.track.Codec().MimeType)
-		defer b.bridge.TrackStopped(ssrc)
+		trackID = b.bridge.TrackStarted(ssrc, b.track.Codec().MimeType)
+		defer b.bridge.TrackStopped(ssrc, trackID)
 	}
 
 	logger.Debugf("stream", "Broadcaster started for track: %s (SSRC: %d)", b.track.Codec().MimeType, b.track.SSRC())
@@ -93,37 +117,48 @@ func (b *TrackBroadcaster) run() {
 	lastPLITime := time.Now()
 
 	for {
-		select {
-		case <-b.closed:
+		pkt, shouldStop := b.readNextPacket()
+		if shouldStop {
 			return
-		default:
+		}
+		if pkt == nil {
+			continue
 		}
 
-		b.track.SetReadDeadline(time.Now().Add(5 * time.Second))
-		pkt, _, err := b.track.ReadRTP()
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				logger.Warnf("stream", "Broadcaster read timeout (no data). Retrying... (SSRC: %d)", b.track.SSRC())
-				continue
-			}
-			
-			logger.Warnf("stream", "Broadcaster read error: %v. Retrying in 1s... (SSRC: %d)", err, b.track.SSRC())
-			
-			select {
-			case <-time.After(1 * time.Second):
-				continue
-			case <-b.closed:
-				return
-			}
-		}
-
-		b.processPacket(pkt, isVideo, isAudio, stats, &lastPLITime)
+		b.processPacket(pkt, isVideo, isAudio, stats, &lastPLITime, trackID)
 
 		if b.bridge != nil {
-			b.bridge.WriteRTP(pkt)
+			b.bridge.WriteRTP(pkt, trackID)
 		}
 
 		b.broadcastToReceivers(pkt)
+	}
+}
+
+func (b *TrackBroadcaster) readNextPacket() (*rtp.Packet, bool) {
+	select {
+	case <-b.closed:
+		return nil, true
+	default:
+	}
+
+	b.track.SetReadDeadline(time.Now().Add(broadcasterReadTimeout))
+	pkt, _, err := b.track.ReadRTP()
+	if err == nil {
+		return pkt, false
+	}
+
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		logger.Warnf("stream", "Broadcaster read timeout (no data). Retrying... (SSRC: %d)", b.track.SSRC())
+		return nil, true
+	}
+
+	if err == io.EOF {
+		logger.Debugf("stream", "Broadcaster track returned EOF. Stopping (SSRC: %d)", b.track.SSRC())
+		return nil, true
+	} else {
+		logger.Warnf("stream", "Broadcaster read error: %v. Stopping (SSRC: %d)", err, b.track.SSRC())
+		return nil, true
 	}
 }
 
@@ -132,6 +167,7 @@ func (b *TrackBroadcaster) processPacket(
 	isVideo, isAudio bool,
 	stats *trackStats,
 	lastPLITime *time.Time,
+	trackID int,
 ) {
 	if isVideo {
 		missing := stats.checkSequenceGap(pkt.SequenceNumber)
@@ -144,7 +180,7 @@ func (b *TrackBroadcaster) processPacket(
 			bridgeStarted = b.bridge.IsStarted()
 		}
 
-		if !bridgeStarted && time.Since(*lastPLITime) > 5*time.Second {
+		if !bridgeStarted && time.Since(*lastPLITime) > bridgeStartupCheckWindow {
 			receiver.SendPLI(b.rtcpWriter, b.track.SSRC())
 			*lastPLITime = time.Now()
 		}
@@ -152,7 +188,7 @@ func (b *TrackBroadcaster) processPacket(
 		b.extractSPSPPS(pkt)
 
 		if b.bridge != nil {
-			receiver.ProcessVideoPacket(pkt, b.bridge)
+			receiver.ProcessVideoPacket(uint32(b.track.SSRC()), trackID, pkt, b.bridge)
 		}
 
 		pkt.PayloadType = rtp_utils.PayloadTypeH264

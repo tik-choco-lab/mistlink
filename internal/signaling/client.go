@@ -1,7 +1,9 @@
 package signaling
 
 import (
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/tik-choco-lab/mistlink/internal/config"
@@ -16,6 +18,15 @@ type Client struct {
 	done     chan struct{}
 	wg       sync.WaitGroup
 	isClosed bool
+	sendChan chan Message
+	mu       sync.Mutex
+	onOffer      func(string, string)
+	onAnswer     func(string, string)
+	onCandidate  func(string, string)
+	onRequest    func(string)
+	onRedirect   func(string, string)
+	onDisconnect func(string)
+	onMessage    func(Message)
 }
 
 func NewClient(cfg *config.Config, clientID string) (*Client, error) {
@@ -140,7 +151,8 @@ func (c *Client) sendMessage(msg Message) error {
 	case c.sendChan <- msg:
 		return nil
 	default:
-		return logger.Errorf("signaling", "Send buffer full, dropping message")
+		logger.Errorf("signaling", "Send buffer full, dropping message")
+		return fmt.Errorf("send buffer full")
 	}
 }
 

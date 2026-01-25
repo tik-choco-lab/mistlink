@@ -11,8 +11,15 @@ const (
 	flushInterval = 50 * time.Millisecond
 )
 
-func (b *RTPBridge) WriteRTP(pkt *rtp.Packet) {
+func (b *RTPBridge) WriteRTP(pkt *rtp.Packet, trackID int) {
 	b.mu.Lock()
+	
+	if currentID, ok := b.activeTracks[pkt.SSRC]; !ok || currentID != trackID {
+		logger.Warnf("RTSP", "RTP Drop: SSRC=%d, TrackID=%d, CurrentMapID=%d, Exists=%v", pkt.SSRC, trackID, currentID, ok)
+		b.mu.Unlock()
+		return
+	}
+	
 	allowed := false
 	if (b.primaryVideoSSRC != 0 && pkt.SSRC == b.primaryVideoSSRC) || (b.primaryAudioSSRC != 0 && pkt.SSRC == b.primaryAudioSSRC) {
 		allowed = true

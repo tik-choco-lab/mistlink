@@ -27,10 +27,16 @@ func HandleMPEGTSStream(
 
 	logger.Debugf("sender", "UDP stream processing started: %s", udpConn.LocalAddr().String())
 
+const rtpPacketBufferSize = 1500
+
 	packet := &rtp.Packet{}
 	packetCount := 0
 	lastLogTime := time.Now()
-	buf := make([]byte, 1500)
+	buf := make([]byte, rtpPacketBufferSize)
+
+	var videoTrackID, audioTrackID int
+	videoTrackRegistered := false
+	audioTrackRegistered := false
 
 	for {
 		n, _, err := udpConn.ReadFromUDP(buf)
@@ -67,9 +73,21 @@ func HandleMPEGTSStream(
 
 		if bridge != nil {
 			if packet.PayloadType == rtp_utils.PayloadTypeH264 {
-				receiver.ProcessVideoPacket(packet, bridge)
+				if !videoTrackRegistered {
+					videoTrackID = bridge.TrackStarted(packet.SSRC, webrtc.MimeTypeH264)
+					defer bridge.TrackStopped(packet.SSRC, videoTrackID)
+					videoTrackRegistered = true
+				}
+				receiver.ProcessVideoPacket(packet.SSRC, videoTrackID, packet, bridge)
+				bridge.WriteRTP(packet, videoTrackID)
+			} else if packet.PayloadType == rtp_utils.PayloadTypeOpus {
+				if !audioTrackRegistered {
+					audioTrackID = bridge.TrackStarted(packet.SSRC, webrtc.MimeTypeOpus)
+					defer bridge.TrackStopped(packet.SSRC, audioTrackID)
+					audioTrackRegistered = true
+				}
+				bridge.WriteRTP(packet, audioTrackID)
 			}
-			bridge.WriteRTP(packet)
 		}
 
 		packetCount++

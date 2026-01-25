@@ -28,6 +28,9 @@ func main() {
 	})
 	defer logger.Sync()
 
+	version := "0.3"
+	logger.Infof("main", "Starting MistLink v%s", version)
+
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Errorf("main", "Failed to load config file: %v. Using defaults.", err)
