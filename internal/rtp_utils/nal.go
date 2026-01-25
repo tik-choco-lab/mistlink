@@ -22,13 +22,16 @@ const (
 	NALTypePPS    = 8
 	NALTypeSTAPA  = 24
 	NALTypeFUA    = 28
+	NALMask       = 0x1F
+	FUStartMask   = 0x80
+	FUEndMask     = 0x40
 )
 
 func GetNALType(payload []byte) byte {
 	if len(payload) == 0 {
 		return 0
 	}
-	return payload[0] & 0x1F
+	return payload[0] & NALMask
 }
 
 func GetNALTypeName(nalType byte) string {

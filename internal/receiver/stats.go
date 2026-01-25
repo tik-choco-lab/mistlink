@@ -8,6 +8,11 @@ import (
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 	"github.com/tik-choco-lab/mistlink/internal/rtp_utils"
 )
+ 
+const (
+	logInterval       = 5 * time.Second
+	gapWarningThreshold = 10
+)
 
 type trackStats struct {
 	packetCount        int
@@ -47,7 +52,7 @@ func (s *trackStats) checkSequenceGap(currentSeq uint16) []uint16 {
 			for i := uint16(1); i <= uint16(gap); i++ {
 				missing = append(missing, s.lastSequenceNumber+i)
 			}
-			if gap > 10 {
+			if gap > gapWarningThreshold {
 				logger.Warnf("receiver", "Sequence gap: %d → %d (lost: %d)", s.lastSequenceNumber, currentSeq, gap)
 			}
 		}
@@ -70,7 +75,7 @@ func (s *trackStats) updateNALStats(nalType byte, hasIDR bool) {
 }
 
 func (s *trackStats) logIfTime(isVideo bool) {
-	if time.Since(s.lastLogTime) <= 5*time.Second {
+	if time.Since(s.lastLogTime) <= logInterval {
 		return
 	}
 
