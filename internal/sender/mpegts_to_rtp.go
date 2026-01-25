@@ -32,6 +32,15 @@ func HandleMPEGTSStream(
 	lastLogTime := time.Now()
 	buf := make([]byte, 1500)
 
+	trackIDs := make(map[uint32]string)
+	defer func() {
+		if bridge != nil {
+			for ssrc, trackID := range trackIDs {
+				bridge.TrackStopped(ssrc, trackID)
+			}
+		}
+	}()
+
 	for {
 		n, _, err := udpConn.ReadFromUDP(buf)
 		if err != nil {
@@ -48,8 +57,10 @@ func HandleMPEGTSStream(
 			continue
 		}
 
+		var mimeType string
 		switch packet.PayloadType {
 		case rtp_utils.PayloadTypeH264:
+			mimeType = webrtc.MimeTypeH264
 			if videoTrack != nil {
 				if err := videoTrack.WriteRTP(packet); err != nil {
 					logger.Errorf("sender", "video track write error: %v", err)
@@ -57,6 +68,7 @@ func HandleMPEGTSStream(
 				}
 			}
 		case rtp_utils.PayloadTypeOpus:
+			mimeType = webrtc.MimeTypeOpus
 			if audioTrack != nil {
 				if err := audioTrack.WriteRTP(packet); err != nil {
 					logger.Errorf("sender", "audio track write error: %v", err)
@@ -65,11 +77,17 @@ func HandleMPEGTSStream(
 			}
 		}
 
-		if bridge != nil {
-			if packet.PayloadType == rtp_utils.PayloadTypeH264 {
-				receiver.ProcessVideoPacket(packet, bridge)
+		if bridge != nil && mimeType != "" {
+			trackID, exists := trackIDs[packet.SSRC]
+			if !exists {
+				trackID = bridge.TrackStarted(packet.SSRC, mimeType)
+				trackIDs[packet.SSRC] = trackID
 			}
-			bridge.WriteRTP(packet)
+
+			if packet.PayloadType == rtp_utils.PayloadTypeH264 {
+				receiver.ProcessVideoPacket(packet, bridge, trackID)
+			}
+			bridge.WriteRTP(packet, trackID)
 		}
 
 		packetCount++

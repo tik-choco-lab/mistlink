@@ -81,9 +81,10 @@ func (b *TrackBroadcaster) run() {
 	}
 
 	ssrc := uint32(b.track.SSRC())
+	var trackID string
 	if b.bridge != nil {
-		b.bridge.TrackStarted(ssrc, b.track.Codec().MimeType)
-		defer b.bridge.TrackStopped(ssrc)
+		trackID = b.bridge.TrackStarted(ssrc, b.track.Codec().MimeType)
+		defer b.bridge.TrackStopped(ssrc, trackID)
 	}
 
 	logger.Debugf("stream", "Broadcaster started for track: %s (SSRC: %d)", b.track.Codec().MimeType, b.track.SSRC())
@@ -124,7 +125,7 @@ func (b *TrackBroadcaster) run() {
 			b.extractSPSPPS(pkt)
 
 			if b.bridge != nil {
-				receiver.ProcessVideoPacket(pkt, b.bridge)
+				receiver.ProcessVideoPacket(pkt, b.bridge, trackID)
 			}
 
 			pkt.PayloadType = rtp_utils.PayloadTypeH264
@@ -134,7 +135,7 @@ func (b *TrackBroadcaster) run() {
 
 
 		if b.bridge != nil {
-			b.bridge.WriteRTP(pkt)
+			b.bridge.WriteRTP(pkt, trackID)
 		}
 
 		if len(b.receivers) > 0 {
