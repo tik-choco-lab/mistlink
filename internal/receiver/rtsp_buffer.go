@@ -9,10 +9,18 @@ import (
 	"github.com/tik-choco-lab/mistlink/internal/rtp_utils"
 	rtspserver "github.com/tik-choco-lab/mistlink/internal/rtsp"
 )
+ 
+const (
+	defaultMTU           = 2048
+	maxSequenceRange     = 65536
+	minMaxBufferSize     = 1000
+	maxFlushBatch        = 500
+	maxStalePacketAge    = 100 * time.Millisecond
+)
 
 var packetPool = sync.Pool{
 	New: func() interface{} {
-		return make([]byte, 2048) // MTU size
+		return make([]byte, defaultMTU)
 	},
 }
 
@@ -43,9 +51,9 @@ func NewRTSPBuffer(size int) *RTSPBuffer {
 	}
 	return &RTSPBuffer{
 		bufferSize:          size,
-		videoBuffer:         make([]*bufferedPacket, 65536),
+		videoBuffer:         make([]*bufferedPacket, maxSequenceRange),
 		videoOrder:          make([]uint16, 0, size),
-		audioBuffer:         make([]*bufferedPacket, 65536),
+		audioBuffer:         make([]*bufferedPacket, maxSequenceRange),
 		audioOrder:          make([]uint16, 0, size),
 		nextSeq:             make(map[uint8]uint16),
 		outgoingSeq:         make(map[uint8]uint16),
@@ -70,8 +78,8 @@ func (b *RTSPBuffer) Add(pkt *rtp.Packet) {
 	}
 
 	maxBufferSize := b.bufferSize / 2
-	if maxBufferSize < 1000 {
-		maxBufferSize = 1000
+	if maxBufferSize < minMaxBufferSize {
+		maxBufferSize = minMaxBufferSize
 	}
 
 	if len(*order) >= maxBufferSize {
@@ -148,12 +156,12 @@ func (b *RTSPBuffer) flushBufferSet(payloadType uint8, server *rtspserver.Server
 	}
 
 	sentInBatch := 0
-	for sentInBatch < 500 && len(*order) > 0 {
+	for sentInBatch < maxFlushBatch && len(*order) > 0 {
 		bpkt := buf[nextSeq]
 		if bpkt == nil {
 			oldestSeq := (*order)[0]
 			oldestPkt := buf[oldestSeq]
-			if oldestPkt != nil && time.Since(oldestPkt.received) > 100*time.Millisecond {
+			if oldestPkt != nil && time.Since(oldestPkt.received) > maxStalePacketAge {
 				nextSeq = oldestSeq
 				b.nextSeq[payloadType] = nextSeq
 				continue

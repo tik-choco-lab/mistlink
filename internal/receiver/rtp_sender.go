@@ -6,6 +6,10 @@ import (
 	"github.com/pion/rtp"
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 )
+ 
+const (
+	flushInterval = 50 * time.Millisecond
+)
 
 func (b *RTPBridge) WriteRTP(pkt *rtp.Packet) {
 	b.mu.Lock()
@@ -49,7 +53,7 @@ func (b *RTPBridge) WriteRTP(pkt *rtp.Packet) {
 func (b *RTPBridge) rtpSenderLoop() {
 	defer b.wg.Done()
 
-	ticker := time.NewTicker(50 * time.Millisecond)
+	ticker := time.NewTicker(flushInterval)
 	defer ticker.Stop()
 
 	for {
