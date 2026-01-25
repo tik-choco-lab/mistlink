@@ -258,28 +258,46 @@ func WaitForStableAndForward(
 	timeout time.Duration,
 	logOnStable bool,
 ) {
-	startTime := time.Now()
-	for {
-		currentPC := getPC()
-		if currentPC == nil {
-			return
-		}
+	pc := getPC()
+	if pc == nil {
+		return
+	}
 
-		signalingState := currentPC.SignalingState()
-		if signalingState == webrtc.SignalingStateStable {
-			if logOnStable {
-				logger.Debugf("sender", "Signaling Stable. Adding OBS tracks [%s]", receiverID)
-			}
-			manager.ForwardOBSTracksToReceiver(receiverID, currentPC, false)
-			return
+	if pc.SignalingState() == webrtc.SignalingStateStable {
+		if logOnStable {
+			logger.Debugf("sender", "Signaling Stable. Adding OBS tracks [%s]", receiverID)
 		}
+		manager.ForwardOBSTracksToReceiver(receiverID, pc, false)
+		return
+	}
 
-		if timeout > 0 && time.Since(startTime) >= timeout {
-			logger.Warnf("sender", "Wait for stable timeout [%s]", receiverID)
-			return
+	stableCh := make(chan struct{})
+	var once sync.Once
+	
+	pc.OnSignalingStateChange(func(state webrtc.SignalingState) {
+		logger.Debugf("sender", "Signaling State [%s]: %s", receiverID, state.String())
+		if state == webrtc.SignalingStateStable {
+			once.Do(func() { close(stableCh) })
 		}
+	})
 
-		time.Sleep(50 * time.Millisecond)
+	if pc.SignalingState() == webrtc.SignalingStateStable {
+		once.Do(func() { close(stableCh) })
+	}
+
+	var timeoutCh <-chan time.Time
+	if timeout > 0 {
+		timeoutCh = time.After(timeout)
+	}
+
+	select {
+	case <-stableCh:
+		if logOnStable {
+			logger.Debugf("sender", "Signaling Stable. Adding OBS tracks [%s]", receiverID)
+		}
+		manager.ForwardOBSTracksToReceiver(receiverID, pc, false)
+	case <-timeoutCh:
+		logger.Warnf("sender", "Wait for stable timeout [%s]", receiverID)
 	}
 }
 
