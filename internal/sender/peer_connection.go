@@ -85,12 +85,5 @@ func CreatePeerConnection(
 	}
 	logger.Debugf("sender", "Offer sent: %s", receiverID)
 
-	select {
-	case <-iceGatheringComplete:
-		logger.Debugf("sender", "ICE Gathering Complete: %s", receiverID)
-	case <-time.After(5 * time.Second):
-		logger.Warnf("sender", "ICE Gathering Timeout: %s", receiverID)
-	}
-
 	return nil
 }
