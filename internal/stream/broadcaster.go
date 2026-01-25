@@ -132,17 +132,25 @@ func (b *TrackBroadcaster) run() {
 			pkt.PayloadType = rtp_utils.PayloadTypeOpus
 		}
 
+
 		if b.bridge != nil {
 			b.bridge.WriteRTP(pkt)
 		}
-		b.mu.RLock()
-		for id, localTrack := range b.receivers {
-			p := pkt.Clone()
-			if err := localTrack.WriteRTP(p); err != nil {
-				logger.Errorf("stream", "Error writing to receiver %s: %v", id, err)
+
+		if len(b.receivers) > 0 {
+			buf, err := pkt.Marshal()
+			if err != nil {
+				logger.Errorf("stream", "Packet marshal error: %v", err)
+			} else {
+				b.mu.RLock()
+				for id, localTrack := range b.receivers {
+					if _, err := localTrack.Write(buf); err != nil {
+						logger.Errorf("stream", "Error writing to receiver %s: %v", id, err)
+					}
+				}
+				b.mu.RUnlock()
 			}
 		}
-		b.mu.RUnlock()
 
 		stats.packetCount++
 		stats.logIfTime(isVideo)
