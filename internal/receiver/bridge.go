@@ -33,6 +33,9 @@ type RTPBridge struct {
 	listenerMu      sync.RWMutex
 	packetListeners map[int]func(*rtp.Packet)
 	nextListenerID  int
+
+	primaryVideoSSRC uint32
+	primaryAudioSSRC uint32
 }
 
 func NewRTPBridge(rtspHost string, rtspPort int, bufferSize int, audioCodec string) (*RTPBridge, int, error) {
@@ -81,9 +84,29 @@ func (b *RTPBridge) TrackStarted(ssrc uint32, mimeType string) {
 	logger.Debugf("receiver", "[Bridge] Track Started: %s (SSRC: %d)", mimeType, ssrc)
 	b.mu.Lock()
 	b.activeTracks[ssrc] = mimeType
+
+	isAudio := strings.EqualFold(mimeType, "audio/opus") || strings.EqualFold(mimeType, "audio/aac")
+	isVideo := strings.HasPrefix(strings.ToLower(mimeType), "video/") && (strings.Contains(strings.ToLower(mimeType), "h264") || strings.Contains(strings.ToLower(mimeType), "avc"))
+
+	if isVideo {
+		if b.primaryVideoSSRC == 0 {
+			b.primaryVideoSSRC = ssrc
+			logger.Debugf("receiver", "Set primary video SSRC: %d", ssrc)
+		} else if b.primaryVideoSSRC != ssrc {
+			logger.Warnf("receiver", "Ignoring additional video track SSRC: %d (Primary: %d)", ssrc, b.primaryVideoSSRC)
+		}
+	} else if isAudio {
+		if b.primaryAudioSSRC == 0 {
+			b.primaryAudioSSRC = ssrc
+			logger.Debugf("receiver", "Set primary audio SSRC: %d", ssrc)
+		} else if b.primaryAudioSSRC != ssrc {
+			logger.Warnf("receiver", "Ignoring additional audio track SSRC: %d (Primary: %d)", ssrc, b.primaryAudioSSRC)
+		}
+	}
+
 	b.mu.Unlock()
 
-	if strings.HasPrefix(strings.ToLower(mimeType), "video/") && (strings.Contains(strings.ToLower(mimeType), "h264") || strings.Contains(strings.ToLower(mimeType), "avc")) {
+	if isVideo {
 		b.RequestIDR()
 	}
 }
@@ -116,6 +139,16 @@ func (b *RTPBridge) IsStarted() bool {
 func (b *RTPBridge) TrackStopped(ssrc uint32) {
 	b.mu.Lock()
 	delete(b.activeTracks, ssrc)
+
+	if b.primaryVideoSSRC == ssrc {
+		b.primaryVideoSSRC = 0
+		logger.Debugf("receiver", "Primary video SSRC stopped: %d", ssrc)
+	}
+	if b.primaryAudioSSRC == ssrc {
+		b.primaryAudioSSRC = 0
+		logger.Debugf("receiver", "Primary audio SSRC stopped: %d", ssrc)
+	}
+
 	b.mu.Unlock()
 
 	b.pliMu.Lock()

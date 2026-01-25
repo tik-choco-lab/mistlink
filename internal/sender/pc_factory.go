@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,6 +25,7 @@ type PeerConnectionConfigurer struct {
 	cfg                    *config.Config
 	bridge                 *receiver.RTPBridge
 	isReceivingRemoteVideo *atomic.Bool
+	incomingSSRCs          sync.Map // uint32 -> bool
 	clientID               string
 	webrtcConfig           *webrtc.Configuration
 }
@@ -56,6 +58,9 @@ func (c *PeerConnectionConfigurer) Configure(
 				}
 			}()
 		}
+
+		c.incomingSSRCs.Store(ssrc, true)
+		defer c.incomingSSRCs.Delete(ssrc)
 
 		receiver.HandleTrack(track, pc.WriteRTCP, c.bridge)
 	})
@@ -177,7 +182,10 @@ func (c *PeerConnectionConfigurer) EnsureOutgoingTracks(
 		close(done)
 	})
 
-	go HandleRelayStream(c.bridge, videoTrack, audioTrack, done)
+	go HandleRelayStream(c.bridge, videoTrack, audioTrack, done, func(ssrc uint32) bool {
+		_, ok := c.incomingSSRCs.Load(ssrc)
+		return ok
+	})
 	return nil
 }
 
