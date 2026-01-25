@@ -25,13 +25,19 @@ type TrackBroadcaster struct {
 	rtcpWriter func([]rtcp.Packet) error
 	bridge     *receiver.RTPBridge
 
-	receivers map[string]*webrtc.TrackLocalStaticRTP
-	mu        sync.RWMutex
+	receiversVar map[string]*receiverWorker
+	mu           sync.RWMutex
 
 	sps []byte
 	pps []byte
 
 	closed chan struct{}
+}
+
+type receiverWorker struct {
+	track *webrtc.TrackLocalStaticRTP
+	ch    chan *rtp.Packet
+	id    string
 }
 
 func NewTrackBroadcaster(
@@ -40,10 +46,10 @@ func NewTrackBroadcaster(
 	bridge *receiver.RTPBridge,
 ) *TrackBroadcaster {
 	return &TrackBroadcaster{
-		track:      track,
+		track:        track,
 		rtcpWriter: rtcpWriter,
 		bridge:     bridge,
-		receivers:  make(map[string]*webrtc.TrackLocalStaticRTP),
+		receiversVar: make(map[string]*receiverWorker),
 		closed:     make(chan struct{}),
 	}
 }
@@ -51,26 +57,27 @@ func NewTrackBroadcaster(
 func (b *TrackBroadcaster) AddReceiver(id string, localTrack *webrtc.TrackLocalStaticRTP) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.receivers[id] = localTrack
+
+	worker := &receiverWorker{
+		id:    id,
+		track: localTrack,
+		ch:    make(chan *rtp.Packet, 16), 
+	}
+	b.receiversVar[id] = worker
+	go worker.start()
 
 	sendCachedNAL := func(nal []byte) {
 		pkt := &rtp.Packet{
 			Header: rtp.Header{
 				Version:     2,
 				PayloadType: rtp_utils.PayloadTypeH264,
-				SSRC:        uint32(b.track.SSRC()),
 			},
 			Payload: nal,
 		}
-		
-		buf, err := pkt.Marshal()
-		if err != nil {
-			logger.Errorf("stream", "Failed to marshal cached NAL: %v", err)
-			return
-		}
-
-		if _, err := localTrack.Write(buf); err != nil {
-			logger.Errorf("stream", "Error sending cached NAL to %s: %v", id, err)
+		select {
+		case worker.ch <- pkt:
+		default:
+			logger.Warnf("stream", "Dropping cached NAL for new receiver %s, channel full", id)
 		}
 	}
 
@@ -89,7 +96,10 @@ func (b *TrackBroadcaster) AddReceiver(id string, localTrack *webrtc.TrackLocalS
 func (b *TrackBroadcaster) RemoveReceiver(id string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	delete(b.receivers, id)
+	if worker, ok := b.receiversVar[id]; ok {
+		close(worker.ch) 
+		delete(b.receiversVar, id)
+	}
 }
 
 func (b *TrackBroadcaster) Start() {
@@ -202,21 +212,29 @@ func (b *TrackBroadcaster) processPacket(
 
 func (b *TrackBroadcaster) broadcastToReceivers(pkt *rtp.Packet) {
 	b.mu.RLock()
-	defer b.mu.RUnlock()
+	workers := make([]*receiverWorker, 0, len(b.receiversVar))
+	for _, w := range b.receiversVar {
+		workers = append(workers, w)
+	}
+	b.mu.RUnlock()
 
-	if len(b.receivers) == 0 {
+	if len(workers) == 0 {
 		return
 	}
 
-	buf, err := pkt.Marshal()
-	if err != nil {
-		logger.Errorf("stream", "Packet marshal error: %v", err)
-		return
+	for _, w := range workers {
+		select {
+		case w.ch <- pkt:
+		default:
+		}
 	}
+}
 
-	for id, localTrack := range b.receivers {
-		if _, err := localTrack.Write(buf); err != nil {
-			logger.Errorf("stream", "Error writing to receiver %s: %v", id, err)
+func (w *receiverWorker) start() {
+	for pkt := range w.ch {
+		pktCopy := *pkt
+		if err := w.track.WriteRTP(&pktCopy); err != nil {
+			logger.Errorf("stream", "Error writing to receiver %s: %v", w.id, err)
 		}
 	}
 }

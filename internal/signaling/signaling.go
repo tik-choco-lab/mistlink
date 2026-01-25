@@ -6,6 +6,7 @@ type Message struct {
 	SenderId   string `json:"SenderId"`
 	ReceiverId string `json:"ReceiverId"`
 	RoomId     string `json:"RoomId"`
+	RootId     string `json:"RootId,omitempty"` 
 }
 
 type Service interface {

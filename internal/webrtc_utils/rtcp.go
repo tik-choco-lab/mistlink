@@ -1,15 +1,31 @@
 package webrtc_utils
 
 import (
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 )
 
-func StartRTCPReadLoop(rtpSender *webrtc.RTPSender) {
+const rtcpBufferSize = 1500
+
+func StartRTCPReadLoop(rtpSender *webrtc.RTPSender, onPLI func()) {
 	go func() {
-		rtcpBuf := make([]byte, 1500)
+		rtcpBuf := make([]byte, rtcpBufferSize)
 		for {
-			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+			n, _, rtcpErr := rtpSender.Read(rtcpBuf)
+			if rtcpErr != nil {
 				return
+			}
+
+			if onPLI != nil {
+				pkts, err := rtcp.Unmarshal(rtcpBuf[:n])
+				if err != nil {
+					continue
+				}
+				for _, pkt := range pkts {
+					if _, ok := pkt.(*rtcp.PictureLossIndication); ok {
+						onPLI()
+					}
+				}
 			}
 		}
 	}()

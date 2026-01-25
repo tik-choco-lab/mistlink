@@ -32,6 +32,7 @@ func HandleTrack(track *webrtc.TrackRemote, rtcpWriter func([]rtcp.Packet) error
 		bridge.RegisterPLIHandler(ssrc, func() {
 			SendPLI(rtcpWriter, track.SSRC())
 		})
+		defer bridge.UnregisterPLIHandler(ssrc)
 	}
 
 	trackID := bridge.TrackStarted(ssrc, track.Codec().MimeType)

@@ -31,7 +31,7 @@ func (m *StreamManager) ForwardTrackToReceiver(
 		return err
 	}
 
-	webrtc_utils.StartRTCPReadLoop(rtpSender)
+	webrtc_utils.StartRTCPReadLoop(rtpSender, nil)
 	m.SubscribeToTrack(track, localTrack, receiverID)
 
 	return nil
@@ -89,7 +89,7 @@ func (m *StreamManager) ForwardOBSTracksToReceiver(receiverID string, receiverPC
 		}
 
 		localTracks = append(localTracks, localTrack)
-		webrtc_utils.StartRTCPReadLoop(rtpSender)
+		webrtc_utils.StartRTCPReadLoop(rtpSender, nil)
 		m.SubscribeToTrack(track, localTrack, receiverID)
 
 		m.fwdMu.Lock()
@@ -145,7 +145,7 @@ func (m *StreamManager) ForwardTrackToReceiverAfterConnection(
 		return err
 	}
 
-	webrtc_utils.StartRTCPReadLoop(rtpSender)
+	webrtc_utils.StartRTCPReadLoop(rtpSender, nil)
 	m.SubscribeToTrack(track, localTrack, receiverID)
 
 	return nil

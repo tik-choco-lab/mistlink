@@ -91,23 +91,22 @@ func (b *RTPBridge) TrackStarted(ssrc uint32, mimeType string) int {
 
 	b.nextListenerID++
 	trackID := b.nextListenerID
-	// Always update trackID to the latest one, effectively "restarting" the track for the bridge
+	
 	b.activeTracks[ssrc] = trackID
 
 	isAudio := strings.EqualFold(mimeType, "audio/opus") || strings.EqualFold(mimeType, "audio/aac")
 	isVideo := strings.HasPrefix(strings.ToLower(mimeType), "video/") && (strings.Contains(strings.ToLower(mimeType), "h264") || strings.Contains(strings.ToLower(mimeType), "avc"))
 
 	if isVideo {
-		// Just overwrite primary video SSRC. If it was different, we switch. If same, we update ID (implicitly via activeTracks map check in WriteRTP)
 		if b.primaryVideoSSRC != ssrc {
-			logger.Infof("receiver", "Switching primary video SSRC: %d -> %d (ID: %d)", b.primaryVideoSSRC, ssrc, trackID)
+			logger.Debugf("receiver", "Switching primary video SSRC: %d -> %d (ID: %d)", b.primaryVideoSSRC, ssrc, trackID)
 		} else {
 			logger.Debugf("receiver", "Updating primary video track ID: %d (SSRC: %d)", trackID, ssrc)
 		}
 		b.primaryVideoSSRC = ssrc
 	} else if isAudio {
 		if b.primaryAudioSSRC != ssrc {
-			logger.Infof("receiver", "Switching primary audio SSRC: %d -> %d (ID: %d)", b.primaryAudioSSRC, ssrc, trackID)
+			logger.Debugf("receiver", "Switching primary audio SSRC: %d -> %d (ID: %d)", b.primaryAudioSSRC, ssrc, trackID)
 		} else {
 			logger.Debugf("receiver", "Updating primary audio track ID: %d (SSRC: %d)", trackID, ssrc)
 		}
@@ -127,6 +126,12 @@ func (b *RTPBridge) RegisterPLIHandler(ssrc uint32, handler func()) {
 	b.pliHandlers[ssrc] = handler
 }
 
+func (b *RTPBridge) UnregisterPLIHandler(ssrc uint32) {
+	b.pliMu.Lock()
+	defer b.pliMu.Unlock()
+	delete(b.pliHandlers, ssrc)
+}
+
 func (b *RTPBridge) RequestIDR() {
 	b.pliMu.Lock()
 	handlers := make([]func(), 0, len(b.pliHandlers))
@@ -136,7 +141,7 @@ func (b *RTPBridge) RequestIDR() {
 	b.pliMu.Unlock()
 
 	for _, h := range handlers {
-		go h()
+		h()
 	}
 }
 

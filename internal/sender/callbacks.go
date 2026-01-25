@@ -25,7 +25,24 @@ func NewOfferCallback(
 	cfg *config.Config,
 	clientID string,
 ) func(string, string) {
+	// Per-sender mutex to serialize Offer/Answer handling
+	senderLocks := make(map[string]*sync.Mutex)
+	var mapMu sync.Mutex
+
+	getLock := func(id string) *sync.Mutex {
+		mapMu.Lock()
+		defer mapMu.Unlock()
+		if _, ok := senderLocks[id]; !ok {
+			senderLocks[id] = &sync.Mutex{}
+		}
+		return senderLocks[id]
+	}
+
 	return func(offer string, senderID string) {
+		mu := getLock(senderID)
+		mu.Lock()
+		defer mu.Unlock()
+
 		if len(offer) < 10 {
 			return
 		}
@@ -64,7 +81,7 @@ func NewAnswerCallback(
 		}
 
 		if pc.SignalingState() != webrtc.SignalingStateHaveLocalOffer {
-			logger.Warnf("sender", "Unexpected signaling state for Answer: %s (%s)", senderID, pc.SignalingState().String())
+			logger.Debugf("sender", "Ignored Answer for previous State or Glare resolution: %s (%s)", senderID, pc.SignalingState().String())
 			return
 		}
 
@@ -95,6 +112,8 @@ func NewAnswerCallback(
 				logger.Debugf("sender", "Buffered ICE Candidate added: %s", senderID)
 			}
 		}
+
+		logger.Debugf("sender", "Connection fully established: %s. Current viewers: %d. acting as Relay Node.", senderID, manager.GetForwardReceiverCount())
 
 		go func() {
 			WaitForStableAndForward(senderID, func() *webrtc.PeerConnection {
@@ -166,15 +185,23 @@ func NewConnectionCallback(
 	cfg *config.Config,
 	clientID string,
 ) func(string) {
-	return func(senderID string) {
-		logger.Debugf("sender", "Connection request: %s (MyID: %s)", senderID, clientID)
+	var requestMu sync.Mutex
+	lastRequestTime := make(map[string]time.Time)
 
-		if clientID <= senderID {
-			logger.Debugf("sender", "[Glare Avoidance] PeerID(%s) >= MyID(%s). Skip offer.", senderID, clientID)
+	return func(senderID string) {
+		requestMu.Lock()
+		last := lastRequestTime[senderID]
+		if time.Since(last) < 1*time.Second {
+			requestMu.Unlock()
+			logger.Debugf("sender", "Ignoring frequent connection request from %s", senderID)
 			return
 		}
+		lastRequestTime[senderID] = time.Now()
+		requestMu.Unlock()
 
-		if manager.GetForwardReceiverCount() >= 3 {
+		logger.Debugf("sender", "Connection request: %s (MyID: %s)", senderID, clientID)
+
+		if len(manager.GetAllReceiverIDs()) >= 2 {
 			target := manager.GetRandomForwardReceiver()
 			if target != "" {
 				logger.Debugf("sender", "[Tree] Max viewers reached. Redirecting %s to %s", senderID, target)
@@ -183,7 +210,7 @@ func NewConnectionCallback(
 				}
 				return
 			}
-			logger.Warnf("sender", "[Tree] Max viewers reached but no children found. Accepting %s temporarily.", senderID)
+			logger.Infof("sender", "[Tree] Max viewers reached (%d) but no stable children found (active forwarders: %d). Accepting %s temporarily.", len(manager.GetAllReceiverIDs()), manager.GetForwardReceiverCount(), senderID)
 		}
 
 		logger.Debugf("sender", "Creating offer as initiator")

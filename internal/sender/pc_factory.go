@@ -168,14 +168,16 @@ func (c *PeerConnectionConfigurer) EnsureOutgoingTracks(
 		pc.Close()
 		return err
 	}
-	webrtc_utils.StartRTCPReadLoop(videoSender)
+	webrtc_utils.StartRTCPReadLoop(videoSender, c.bridge.RequestIDR)
 
 	audioSender, err := pc.AddTrack(audioTrack)
 	if err != nil {
 		pc.Close()
 		return err
 	}
-	webrtc_utils.StartRTCPReadLoop(audioSender)
+	webrtc_utils.StartRTCPReadLoop(audioSender, nil)
+
+	c.manager.MarkAsForwarder(peerID)
 
 	done := make(chan struct{})
 	c.manager.RegisterCloseHandler(peerID, func() {

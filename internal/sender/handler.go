@@ -84,12 +84,25 @@ func HandleOfferAsReceiver(
 			manager.AddPeerConnection(senderID, pc)
 		}
 
-		if pc.SignalingState() != webrtc.SignalingStateStable && pc.SignalingState() != webrtc.SignalingStateClosed {
-			if pc.SignalingState() == webrtc.SignalingStateHaveLocalOffer {
-				if err := pc.SetLocalDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeRollback}); err != nil {
-					logger.Warnf("sender", "Rollback failed [%s]: %v", senderID, err)
-				}
+		if pc.SignalingState() == webrtc.SignalingStateHaveLocalOffer {
+			logger.Debugf("sender", "Glare detected (HaveLocalOffer), resetting PC to accept remote offer [%s]", senderID)
+			pc.Close()
+			if !isNewPC {
 			}
+			m := &webrtc.MediaEngine{}
+			m.RegisterDefaultCodecs()
+			i := &interceptor.Registry{}
+			webrtc.RegisterDefaultInterceptors(m, i)
+			api := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i))
+			var newPCErr error
+			pc, newPCErr = api.NewPeerConnection(*config)
+			if newPCErr != nil {
+				return newPCErr
+			}
+			isNewPC = true
+			
+			configurer.Configure(pc, senderID, nil, nil)
+			manager.AddPeerConnection(senderID, pc)
 		}
 
 		if err := configurer.EnsureOutgoingTracks(senderID, pc, true, true); err != nil {

@@ -43,6 +43,14 @@ func NewStreamManager(cfg *config.Config, sig signaling.Service, bridge *receive
 	}
 }
 
+func (m *StreamManager) MarkAsForwarder(id string) {
+	m.fwdMu.Lock()
+	defer m.fwdMu.Unlock()
+	if _, exists := m.forwardedReceivers[id]; !exists {
+		m.forwardedReceivers[id] = make(map[*webrtc.TrackRemote]bool)
+	}
+}
+
 func (m *StreamManager) RegisterCloseHandler(id string, handler func()) {
 	m.closeMu.Lock()
 	defer m.closeMu.Unlock()

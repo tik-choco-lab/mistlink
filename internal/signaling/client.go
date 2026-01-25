@@ -34,7 +34,7 @@ func NewClient(cfg *config.Config, clientID string) (*Client, error) {
 		config:   cfg,
 		roomID:   cfg.RoomID,
 		clientID: clientID,
-		sendChan: make(chan Message, 256),
+		sendChan: make(chan Message, 1024),
 		done:     make(chan struct{}),
 	}
 
@@ -64,8 +64,6 @@ func (c *Client) connect() error {
 	c.conn = conn
 	c.mu.Unlock()
 
-	go c.writePump(conn)
-
 	joinMsg := Message{Type: "Join", RoomId: c.roomID, SenderId: c.clientID}
 	if err := c.sendImmediate(conn, joinMsg); err != nil {
 		conn.Close()
@@ -78,6 +76,7 @@ func (c *Client) connect() error {
 		return err
 	}
 
+	go c.writePump(conn)
 	go c.readLoop(conn)
 	
 	logger.Debugf("signaling", "Connected to signaling server")
@@ -127,7 +126,7 @@ func (c *Client) SetCallbacks(
 }
 
 func (c *Client) SendOffer(offer string, receiverID string) error {
-	return c.sendMessage(Message{Type: "Offer", Data: offer, SenderId: c.clientID, ReceiverId: receiverID, RoomId: c.roomID})
+	return c.sendMessage(Message{Type: "Offer", Data: offer, SenderId: c.clientID, ReceiverId: receiverID, RoomId: c.roomID, RootId: c.clientID})
 }
 
 func (c *Client) SendAnswer(answer string, receiverID string) error {
@@ -143,7 +142,7 @@ func (c *Client) SendRequest(receiverID string) error {
 }
 
 func (c *Client) SendRedirect(targetID string, receiverID string) error {
-	return c.sendMessage(Message{Type: "Redirect", Data: targetID, SenderId: c.clientID, ReceiverId: receiverID, RoomId: c.roomID})
+	return c.sendMessage(Message{Type: "Redirect", Data: targetID, SenderId: c.clientID, ReceiverId: receiverID, RoomId: c.roomID, RootId: c.clientID})
 }
 
 func (c *Client) sendMessage(msg Message) error {
@@ -238,27 +237,27 @@ func (c *Client) dispatchMessage(msg Message) {
 	switch msg.Type {
 	case "Offer":
 		if c.onOffer != nil {
-			go c.onOffer(msg.Data, msg.SenderId)
+			c.onOffer(msg.Data, msg.SenderId)
 		}
 	case "Answer":
 		if c.onAnswer != nil {
-			go c.onAnswer(msg.Data, msg.SenderId)
+			c.onAnswer(msg.Data, msg.SenderId)
 		}
 	case "Candidate":
 		if c.onCandidate != nil {
-			go c.onCandidate(msg.Data, msg.SenderId)
+			c.onCandidate(msg.Data, msg.SenderId)
 		}
 	case "Request":
 		if c.onRequest != nil {
-			go c.onRequest(msg.SenderId)
+			c.onRequest(msg.SenderId)
 		}
 	case "Redirect":
 		if c.onRedirect != nil {
-			go c.onRedirect(msg.Data, msg.SenderId)
+			c.onRedirect(msg.Data, msg.SenderId)
 		}
 	case "Disconnect":
 		if c.onDisconnect != nil {
-			go c.onDisconnect(msg.SenderId)
+			c.onDisconnect(msg.SenderId)
 		}
 	}
 }
