@@ -8,11 +8,19 @@ import (
 )
 
 func (b *RTPBridge) WriteRTP(pkt *rtp.Packet) {
-	b.Broadcast(pkt)
-
 	b.mu.Lock()
+	allowed := false
+	if (b.primaryVideoSSRC != 0 && pkt.SSRC == b.primaryVideoSSRC) || (b.primaryAudioSSRC != 0 && pkt.SSRC == b.primaryAudioSSRC) {
+		allowed = true
+	}
 	started := b.started
 	b.mu.Unlock()
+
+	if !allowed {
+		return
+	}
+
+	b.Broadcast(pkt)
 
 	if !started {
 		return

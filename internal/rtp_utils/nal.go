@@ -10,7 +10,7 @@ const (
 	VideoSSRC = 0x12345678
 	AudioSSRC = 0x87654321
 
-	MaxTimestampDelta = 0xFFFFFF
+	MaxTimestampDelta = 90000
 
 	LogIntervalPackets      = 100
 	DummyTimestampIncrement = 9000

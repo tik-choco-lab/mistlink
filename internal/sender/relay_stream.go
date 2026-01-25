@@ -13,6 +13,7 @@ func HandleRelayStream(
 	videoTrack *webrtc.TrackLocalStaticRTP,
 	audioTrack *webrtc.TrackLocalStaticRTP,
 	done <-chan struct{},
+	ignoreSSRC func(uint32) bool,
 ) {
 	if bridge == nil {
 		logger.Errorf("sender", "Bridge is nil in HandleRelayStream")
@@ -22,6 +23,9 @@ func HandleRelayStream(
 	pktChan := make(chan *rtp.Packet, 100)
 
 	listenerID := bridge.AddListener(func(pkt *rtp.Packet) {
+		if ignoreSSRC != nil && ignoreSSRC(pkt.SSRC) {
+			return
+		}
 		select {
 		case pktChan <- pkt:
 		default:
