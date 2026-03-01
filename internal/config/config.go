@@ -21,6 +21,10 @@ type Config struct {
 	Audio                bool               `json:"audio"`
 	AudioCodec           string             `json:"audio_codec"`
 	ICEServers           []webrtc.ICEServer `json:"iceservers"`
+	UseTUI               bool               `json:"use_tui"`
+	ScreenCapture        bool               `json:"screen_capture"`
+	CaptureTarget        string             `json:"capture_target"` // Window title or "entire"
+	FrameRate            int                `json:"frame_rate"`
 }
 
 const (
@@ -44,6 +48,7 @@ func DefaultConfig() *Config {
 				URLs: []string{"stun:stun.l.google.com:19302"},
 			},
 		},
+		FrameRate: 15,
 	}
 }
 

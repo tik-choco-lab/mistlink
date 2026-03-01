@@ -11,11 +11,19 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pion/webrtc/v4"
+	"github.com/tik-choco-lab/mistlink/internal/capture"
 	"github.com/tik-choco-lab/mistlink/internal/config"
 	"github.com/tik-choco-lab/mistlink/internal/logger"
 	"github.com/tik-choco-lab/mistlink/internal/receiver"
 	"github.com/tik-choco-lab/mistlink/internal/signaling"
 	"github.com/tik-choco-lab/mistlink/internal/stream"
+	"github.com/tik-choco-lab/mistlink/internal/tui"
+
+	"github.com/pion/mediadevices"
+	"github.com/pion/mediadevices/pkg/codec/vpx"
+	"github.com/pion/mediadevices/pkg/prop"
+
+	_ "github.com/pion/mediadevices/pkg/driver/screen"
 )
 
 const (
@@ -26,29 +34,30 @@ const (
 )
 
 func Run(cfg *config.Config) error {
-	addr, err := parseUDPAddr(cfg.InputURL)
-	if err != nil {
-		return fmt.Errorf("udp addr parse error: %w", err)
-	}
-
 	var conn *net.UDPConn
-	for {
-		conn, err = net.ListenUDP("udp", addr)
-		if err == nil {
-			break
+	if !cfg.ScreenCapture {
+		addr, err := parseUDPAddr(cfg.InputURL)
+		if err != nil {
+			return fmt.Errorf("udp addr parse error: %w", err)
 		}
-		if strings.Contains(err.Error(), "address already in use") || strings.Contains(err.Error(), "bind: Only one usage") {
-			logger.Warnf("sender", "UDP Port %d already in use, trying next...", addr.Port)
-			addr.Port++
-			continue
+
+		for {
+			conn, err = net.ListenUDP("udp", addr)
+			if err == nil {
+				break
+			}
+			if strings.Contains(err.Error(), "address already in use") || strings.Contains(err.Error(), "bind: Only one usage") {
+				logger.Warnf("sender", "UDP Port %d already in use, trying next...", addr.Port)
+				addr.Port++
+				continue
+			}
+			return fmt.Errorf("udp listen error: %w", err)
 		}
-		return fmt.Errorf("udp listen error: %w", err)
+		defer conn.Close()
+
+		cfg.InputURL = fmt.Sprintf("udp://%s", addr.String())
+		logger.Debugf("sender", "UDP listening on: %s", addr.String())
 	}
-	defer conn.Close()
-
-	cfg.InputURL = fmt.Sprintf("udp://%s", addr.String())
-
-	logger.Debugf("sender", "UDP listening on: %s", addr.String())
 
 	clientID := uuid.New().String()
 	logger.Debugf("sender", "Connecting to signaling server: %s (Room: %s, ClientID: %s)", cfg.SignalingServer, cfg.RoomID, clientID)
@@ -119,6 +128,35 @@ func Run(cfg *config.Config) error {
 		}
 	}
 
+	startSharing := func(inputType string, target string) {
+		if inputType == "screen" {
+			capture.Init()
+			logger.Infof("sender", "Starting Screen Capture...")
+			s, err := mediadevices.GetDisplayMedia(mediadevices.MediaStreamConstraints{
+				Video: func(c *mediadevices.MediaTrackConfigs) {
+					c.FrameRate = prop.Float64(float64(cfg.FrameRate))
+				},
+				Codec: vpx.NewVP8IncrementalEncoder,
+			})
+			if err != nil {
+				logger.Errorf("sender", "failed to get display media: %v", err)
+				return
+			}
+			for _, track := range s.GetTracks() {
+				manager.AddTrack(track)
+			}
+		} else {
+			logger.Infof("sender", "Starting UDP listener...")
+			// Logic already handles conn if not nil
+		}
+	}
+
+	if cfg.ScreenCapture {
+		startSharing("screen", cfg.CaptureTarget)
+	} else if cfg.InputURL != "udp://0.0.0.0:1234" {
+		startSharing("udp", "")
+	}
+
 	sigClient.SetCallbacks(
 		NewOfferCallback(manager, sigClient, &webrtcConfig, conn, bridge, &isReceivingRemoteVideo, cfg, clientID),
 		NewAnswerCallback(manager, bridge, pendingCandidates, &pendingCandidatesMu),
@@ -127,6 +165,14 @@ func Run(cfg *config.Config) error {
 		NewRedirectCallback(sigClient),
 		NewDisconnectCallback(manager),
 	)
+
+	if cfg.UseTUI {
+		p, err := tui.Start(cfg, manager, startSharing)
+		if err != nil {
+			return fmt.Errorf("tui start error: %w", err)
+		}
+		return tui.Run(p)
+	}
 
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Printf("RoomID: %s\n", cfg.RoomID)
