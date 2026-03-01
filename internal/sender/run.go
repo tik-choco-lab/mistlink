@@ -20,7 +20,7 @@ import (
 	"github.com/tik-choco-lab/mistlink/internal/tui"
 
 	"github.com/pion/mediadevices"
-	"github.com/pion/mediadevices/pkg/codec/vpx"
+	"github.com/pion/mediadevices/pkg/codec/openh264"
 	"github.com/pion/mediadevices/pkg/prop"
 
 	_ "github.com/pion/mediadevices/pkg/driver/screen"
@@ -132,11 +132,12 @@ func Run(cfg *config.Config) error {
 		if inputType == "screen" {
 			capture.Init()
 			logger.Infof("sender", "Starting Screen Capture...")
+			p, _ := openh264.NewParams()
 			s, err := mediadevices.GetDisplayMedia(mediadevices.MediaStreamConstraints{
-				Video: func(c *mediadevices.MediaTrackConfigs) {
-					c.FrameRate = prop.Float64(float64(cfg.FrameRate))
+				Video: func(c *mediadevices.MediaTrackConstraints) {
+					c.FrameRate = prop.Float(float32(cfg.FrameRate))
 				},
-				Codec: vpx.NewVP8IncrementalEncoder,
+				Codec: mediadevices.NewCodecSelector(mediadevices.WithVideoEncoders(&p)),
 			})
 			if err != nil {
 				logger.Errorf("sender", "failed to get display media: %v", err)
