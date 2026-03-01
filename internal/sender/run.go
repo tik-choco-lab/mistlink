@@ -21,6 +21,7 @@ import (
 
 	"github.com/pion/mediadevices"
 	"github.com/pion/mediadevices/pkg/codec/openh264"
+	"github.com/pion/mediadevices/pkg/codec/opus"
 	"github.com/pion/mediadevices/pkg/prop"
 
 	_ "github.com/pion/mediadevices/pkg/driver/screen"
@@ -128,34 +129,72 @@ func Run(cfg *config.Config) error {
 		}
 	}
 
-	startSharing := func(inputType string, target string) {
+	startSharing := func(inputType string, target string, audioSource string) {
+		manager.AddTrack(nil) // Trigger any pending logic if needed
+
+		var videoTrack mediadevices.Track
+		var audioTrack mediadevices.Track
+
 		if inputType == "screen" {
 			capture.Init()
 			logger.Infof("sender", "Starting Screen Capture...")
-			p, _ := openh264.NewParams()
-			s, err := mediadevices.GetDisplayMedia(mediadevices.MediaStreamConstraints{
+			vp, _ := openh264.NewParams()
+
+			constraints := mediadevices.MediaStreamConstraints{
 				Video: func(c *mediadevices.MediaTrackConstraints) {
 					c.FrameRate = prop.Float(float32(cfg.FrameRate))
 				},
-				Codec: mediadevices.NewCodecSelector(mediadevices.WithVideoEncoders(&p)),
-			})
+				Codec: mediadevices.NewCodecSelector(mediadevices.WithVideoEncoders(&vp)),
+			}
+
+			s, err := mediadevices.GetDisplayMedia(constraints)
 			if err != nil {
 				logger.Errorf("sender", "failed to get display media: %v", err)
-				return
+			} else {
+				for _, track := range s.GetTracks() {
+					manager.AddTrack(track)
+					videoTrack = track
+				}
 			}
-			for _, track := range s.GetTracks() {
-				manager.AddTrack(track)
-			}
-		} else {
-			logger.Infof("sender", "Starting UDP listener...")
-			// Logic already handles conn if not nil
 		}
+
+		if audioSource != "none" {
+			logger.Infof("sender", "Starting Audio Capture (%s)...", audioSource)
+			ap, _ := opus.NewParams()
+
+			constraints := mediadevices.MediaStreamConstraints{
+				Audio: func(c *mediadevices.MediaTrackConstraints) {
+				},
+				Codec: mediadevices.NewCodecSelector(mediadevices.WithAudioEncoders(&ap)),
+			}
+
+			s, err := mediadevices.GetUserMedia(constraints)
+			if err != nil {
+				logger.Errorf("sender", "failed to get audio media: %v", err)
+			} else {
+				for _, track := range s.GetTracks() {
+					manager.AddTrack(track)
+					audioTrack = track
+				}
+			}
+		}
+
+		if inputType == "udp" {
+			logger.Infof("sender", "Starting UDP listener...")
+		}
+
+		_ = videoTrack
+		_ = audioTrack
 	}
 
 	if cfg.ScreenCapture {
-		startSharing("screen", cfg.CaptureTarget)
+		audioSrc := "none"
+		if cfg.AudioCapture {
+			audioSrc = cfg.AudioSource
+		}
+		startSharing("screen", cfg.CaptureTarget, audioSrc)
 	} else if cfg.InputURL != "udp://0.0.0.0:1234" {
-		startSharing("udp", "")
+		startSharing("udp", "", "none")
 	}
 
 	sigClient.SetCallbacks(
