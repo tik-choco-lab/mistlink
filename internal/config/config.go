@@ -25,6 +25,8 @@ type Config struct {
 	ScreenCapture        bool               `json:"screen_capture"`
 	CaptureTarget        string             `json:"capture_target"` // Window title or "entire"
 	FrameRate            int                `json:"frame_rate"`
+	AudioCapture         bool               `json:"audio_capture"`
+	AudioSource          string             `json:"audio_source"` // "system", "microphone", or device ID
 }
 
 const (

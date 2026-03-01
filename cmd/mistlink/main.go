@@ -20,6 +20,8 @@ func main() {
 		useTUI        = flag.Bool("tui", true, "Use TUI")
 		screenCapture = flag.Bool("screen-capture", false, "Capture screen/window instead of UDP")
 		captureTarget = flag.String("capture-target", "entire", "Window title or 'entire'")
+		audioCapture  = flag.Bool("audio-capture", false, "Enable audio capture during screen sharing")
+		audioSource   = flag.String("audio-source", "microphone", "Audio source: 'microphone' or 'system'")
 	)
 	flag.BoolVar(debug, "d", false, "Enable debug logging (alias)")
 	flag.BoolVar(showConfig, "c", false, "Show config (alias)")
@@ -73,6 +75,12 @@ func main() {
 	}
 	if *captureTarget != "entire" {
 		cfg.CaptureTarget = *captureTarget
+	}
+	if *audioCapture {
+		cfg.AudioCapture = true
+	}
+	if *audioSource != "microphone" {
+		cfg.AudioSource = *audioSource
 	}
 
 	if cfg.SignalingServer == "" {

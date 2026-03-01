@@ -41,7 +41,9 @@ var (
 type State int
 
 const (
-	StateSelecting State = iota
+	StateSelectingSource State = iota
+	StateSelectingWindow
+	StateSelectingAudio
 	StateRunning
 )
 
@@ -54,13 +56,12 @@ type model struct {
 	width    int
 	height   int
 
-	// Selection state
-	choices     []string
-	cursor      int
-	windowTitle string
+	choices        []string
+	cursor         int
+	selectedInput  string
+	selectedTarget string
 
-	// Signaling
-	OnSelect func(inputType string, target string)
+	OnSelect func(inputType string, target string, audioSource string)
 }
 
 type logMsg logger.LogEntry
@@ -74,7 +75,7 @@ func NewModel(cfg *config.Config, manager *stream.StreamManager) model {
 
 	state := StateRunning
 	if !cfg.ScreenCapture && cfg.InputURL == "udp://0.0.0.0:1234" {
-		state = StateSelecting
+		state = StateSelectingSource
 	}
 
 	return model{
@@ -103,7 +104,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if m.state == StateSelecting {
+		if m.state != StateRunning {
 			switch msg.String() {
 			case "up", "j":
 				if m.cursor > 0 {
@@ -115,39 +116,63 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "enter":
 				choice := m.choices[m.cursor]
-				if choice == "Specific Window Capture..." {
-					wins, err := capture.ListWindows()
-					if err == nil && len(wins) > 0 {
-						m.choices = []string{"Back"}
-						for _, w := range wins {
-							m.choices = append(m.choices, w.Title)
+
+				switch m.state {
+				case StateSelectingSource:
+					if choice == "Specific Window Capture..." {
+						wins, err := capture.ListWindows()
+						if err == nil && len(wins) > 0 {
+							m.choices = []string{"Back"}
+							for _, w := range wins {
+								m.choices = append(m.choices, w.Title)
+							}
+							m.cursor = 0
+							m.state = StateSelectingWindow
+							return m, nil
 						}
+					}
+					if choice == "Full Screen Capture" {
+						m.selectedInput = "screen"
+						m.selectedTarget = "entire"
+						m.state = StateSelectingAudio
+						m.choices = []string{"No Audio", "Microphone", "System Audio (Loopback)"}
 						m.cursor = 0
 						return m, nil
 					}
-				}
-				if choice == "Back" {
-					m.choices = []string{"UDP Stream (Default)", "Full Screen Capture", "Specific Window Capture..."}
+					if choice == "UDP Stream (Default)" {
+						if m.OnSelect != nil {
+							m.OnSelect("udp", "", "none")
+						}
+						m.state = StateRunning
+					}
+
+				case StateSelectingWindow:
+					if choice == "Back" {
+						m.state = StateSelectingSource
+						m.choices = []string{"UDP Stream (Default)", "Full Screen Capture", "Specific Window Capture..."}
+						m.cursor = 0
+						return m, nil
+					}
+					m.selectedInput = "screen"
+					m.selectedTarget = choice
+					m.state = StateSelectingAudio
+					m.choices = []string{"No Audio", "Microphone", "System Audio (Loopback)"}
 					m.cursor = 0
 					return m, nil
-				}
 
-				inputType := "udp"
-				target := ""
-				if choice == "Full Screen Capture" {
-					inputType = "screen"
-					target = "entire"
-				} else if strings.Contains(choice, "UDP Stream") {
-					inputType = "udp"
-				} else {
-					inputType = "screen"
-					target = choice
-				}
+				case StateSelectingAudio:
+					audioSource := "none"
+					if choice == "Microphone" {
+						audioSource = "microphone"
+					} else if choice == "System Audio (Loopback)" {
+						audioSource = "system"
+					}
 
-				if m.OnSelect != nil {
-					m.OnSelect(inputType, target)
+					if m.OnSelect != nil {
+						m.OnSelect(m.selectedInput, m.selectedTarget, audioSource)
+					}
+					m.state = StateRunning
 				}
-				m.state = StateRunning
 			}
 		}
 
@@ -201,8 +226,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	var b strings.Builder
 
-	if m.state == StateSelecting {
-		b.WriteString(titleStyle.Render("Welcome to MistLink! Select Input Source:"))
+	if m.state != StateRunning {
+		title := "Select Input Source:"
+		if m.state == StateSelectingWindow {
+			title = "Select Window to Capture:"
+		} else if m.state == StateSelectingAudio {
+			title = "Select Audio Source:"
+		}
+
+		b.WriteString(titleStyle.Render("MistLink Setup: " + title))
 		b.WriteString("\n\n")
 
 		for i, choice := range m.choices {
@@ -247,7 +279,7 @@ func Run(p *tea.Program) error {
 	return err
 }
 
-func Start(cfg *config.Config, manager *stream.StreamManager, onSelect func(string, string)) (*tea.Program, error) {
+func Start(cfg *config.Config, manager *stream.StreamManager, onSelect func(string, string, string)) (*tea.Program, error) {
 	m := NewModel(cfg, manager)
 	m.OnSelect = onSelect
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
