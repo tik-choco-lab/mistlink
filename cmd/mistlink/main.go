@@ -10,21 +10,26 @@ import (
 
 func main() {
 	var (
-		room       = flag.String("room", "", "Room ID")
-		input      = flag.String("input", "", "Input source (e.g. udp://0.0.0.0:1234)")
-		server     = flag.String("server", "", "MistNet signaling server URL")
-		rtspServer = flag.String("rtsp-server", "", "RTSP server URL")
-		whipServer = flag.String("whip-server", "", "WHIP server URL")
-		debug      = flag.Bool("debug", false, "Enable debug logging")
-		showConfig = flag.Bool("show-config", false, "Show config")
+		room          = flag.String("room", "", "Room ID")
+		input         = flag.String("input", "", "Input source (e.g. udp://0.0.0.0:1234)")
+		server        = flag.String("server", "", "MistNet signaling server URL")
+		rtspServer    = flag.String("rtsp-server", "", "RTSP server URL")
+		whipServer    = flag.String("whip-server", "", "WHIP server URL")
+		debug         = flag.Bool("debug", false, "Enable debug logging")
+		showConfig    = flag.Bool("show-config", false, "Show config")
+		useTUI        = flag.Bool("tui", true, "Use TUI")
+		screenCapture = flag.Bool("screen-capture", false, "Capture screen/window instead of UDP")
+		captureTarget = flag.String("capture-target", "entire", "Window title or 'entire'")
 	)
 	flag.BoolVar(debug, "d", false, "Enable debug logging (alias)")
 	flag.BoolVar(showConfig, "c", false, "Show config (alias)")
+	flag.BoolVar(useTUI, "t", true, "Use TUI (alias)")
 	flag.Parse()
 
 	logger.InitWithOptions(logger.Options{
-		Debug:     *debug,
-		UseStderr: true,
+		Debug:          *debug,
+		UseStderr:      !*useTUI,
+		DisableConsole: *useTUI,
 	})
 	defer logger.Sync()
 
@@ -60,6 +65,14 @@ func main() {
 
 	if *whipServer != "" {
 		cfg.WHIPURL = *whipServer
+	}
+
+	cfg.UseTUI = *useTUI
+	if *screenCapture {
+		cfg.ScreenCapture = true
+	}
+	if *captureTarget != "entire" {
+		cfg.CaptureTarget = *captureTarget
 	}
 
 	if cfg.SignalingServer == "" {

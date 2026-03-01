@@ -11,14 +11,44 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+type Options struct {
+	Debug          bool
+	UseStderr      bool
+	DisableConsole bool
+}
+
+type LogEntry struct {
+	Level    string
+	Category string
+	Message  string
+	Time     time.Time
+}
+
 var (
-	log  *zap.Logger = zap.NewNop()
-	once sync.Once
+	log           *zap.Logger = zap.NewNop()
+	once          sync.Once
+	logHandlers   []func(LogEntry)
+	logHandlersMu sync.RWMutex
 )
 
-type Options struct {
-	Debug     bool
-	UseStderr bool
+func AddLogHandler(h func(LogEntry)) {
+	logHandlersMu.Lock()
+	defer logHandlersMu.Unlock()
+	logHandlers = append(logHandlers, h)
+}
+
+func notifyHandlers(level, category, message string) {
+	entry := LogEntry{
+		Level:    level,
+		Category: category,
+		Message:  message,
+		Time:     time.Now(),
+	}
+	logHandlersMu.RLock()
+	defer logHandlersMu.RUnlock()
+	for _, h := range logHandlers {
+		h(entry)
+	}
 }
 
 func Init()                    { InitWithOptions(Options{}) }
@@ -55,7 +85,7 @@ func InitWithOptions(opts Options) {
 		var cores []zapcore.Core
 		cores = append(cores, fileCore)
 
-		if opts.Debug || opts.UseStderr {
+		if !opts.DisableConsole && (opts.Debug || opts.UseStderr) {
 			consoleEncoderConfig := zap.NewDevelopmentEncoderConfig()
 			consoleEncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 			consoleEncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("15:04:05")
@@ -85,38 +115,52 @@ func Sync() {
 
 func Debug(category, message string) {
 	log.Debug(message, zap.String("category", category))
+	notifyHandlers("DEBUG", category, message)
 }
 
 func Debugf(category, format string, args ...interface{}) {
-	log.Debug(fmt.Sprintf(format, args...), zap.String("category", category))
+	message := fmt.Sprintf(format, args...)
+	log.Debug(message, zap.String("category", category))
+	notifyHandlers("DEBUG", category, message)
 }
 
 func Info(category, message string) {
 	log.Info(message, zap.String("category", category))
+	notifyHandlers("INFO", category, message)
 }
 
 func Infof(category, format string, args ...interface{}) {
-	log.Info(fmt.Sprintf(format, args...), zap.String("category", category))
+	message := fmt.Sprintf(format, args...)
+	log.Info(message, zap.String("category", category))
+	notifyHandlers("INFO", category, message)
 }
 
 func Warn(category, message string) {
 	log.Warn(message, zap.String("category", category))
+	notifyHandlers("WARN", category, message)
 }
 
 func Warnf(category, format string, args ...interface{}) {
-	log.Warn(fmt.Sprintf(format, args...), zap.String("category", category))
+	message := fmt.Sprintf(format, args...)
+	log.Warn(message, zap.String("category", category))
+	notifyHandlers("WARN", category, message)
 }
 
 func Error(category, message string) {
 	log.Error(message, zap.String("category", category))
+	notifyHandlers("ERROR", category, message)
 }
 
 func Errorf(category, format string, args ...interface{}) {
-	log.Error(fmt.Sprintf(format, args...), zap.String("category", category))
+	message := fmt.Sprintf(format, args...)
+	log.Error(message, zap.String("category", category))
+	notifyHandlers("ERROR", category, message)
 }
 
 func LogError(category string, err error) {
 	if err != nil {
-		log.Error(err.Error(), zap.String("category", category))
+		message := err.Error()
+		log.Error(message, zap.String("category", category))
+		notifyHandlers("ERROR", category, message)
 	}
 }

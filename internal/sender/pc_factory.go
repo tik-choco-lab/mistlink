@@ -138,6 +138,20 @@ func (c *PeerConnectionConfigurer) EnsureOutgoingTracks(
 		return nil
 	}
 
+	localTracks := c.manager.GetTracks()
+	if len(localTracks) > 0 {
+		logger.Debugf("sender", "Forwarding %d local tracks [%s]", len(localTracks), peerID)
+		for _, track := range localTracks {
+			sender, err := pc.AddTrack(track)
+			if err != nil {
+				logger.Errorf("sender", "Error adding local track: %v", err)
+				continue
+			}
+			webrtc_utils.StartRTCPReadLoop(sender)
+		}
+		return nil
+	}
+
 	if pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
 		return nil
 	}
@@ -273,7 +287,7 @@ func WaitForStableAndForward(
 
 	stableCh := make(chan struct{})
 	var once sync.Once
-	
+
 	pc.OnSignalingStateChange(func(state webrtc.SignalingState) {
 		logger.Debugf("sender", "Signaling State [%s]: %s", receiverID, state.String())
 		if state == webrtc.SignalingStateStable {
