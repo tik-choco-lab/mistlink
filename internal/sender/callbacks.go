@@ -24,6 +24,8 @@ func NewOfferCallback(
 	isReceivingRemoteVideo *atomic.Bool,
 	cfg *config.Config,
 	clientID string,
+	pendingCandidates map[string][]webrtc.ICECandidateInit,
+	mu *sync.Mutex,
 ) func(string, string) {
 	return func(offer string, senderID string) {
 		if len(offer) < 10 {
@@ -43,7 +45,9 @@ func NewOfferCallback(
 			}
 			if err := HandleOfferAsReceiver(offer, senderID, sigClient, webrtcConfig, manager, conn, bridge, isReceivingRemoteVideo, cfg, clientID); err != nil {
 				logger.Errorf("sender", "Offer handle error: %v", err)
+				return
 			}
+			applyPendingCandidates(manager, pendingCandidates, mu, senderID)
 		}()
 	}
 }
@@ -101,6 +105,31 @@ func NewAnswerCallback(
 				return manager.GetPeerConnection(senderID)
 			}, manager, time.Second, true)
 		}()
+	}
+}
+
+func applyPendingCandidates(
+	manager *stream.StreamManager,
+	pendingCandidates map[string][]webrtc.ICECandidateInit,
+	mu *sync.Mutex,
+	senderID string,
+) {
+	pc := manager.GetPeerConnection(senderID)
+	if pc == nil || pc.RemoteDescription() == nil {
+		return
+	}
+
+	mu.Lock()
+	candidates := pendingCandidates[senderID]
+	delete(pendingCandidates, senderID)
+	mu.Unlock()
+
+	for _, cand := range candidates {
+		if err := pc.AddICECandidate(cand); err != nil {
+			logger.Warnf("sender", "ICE Candidate add error: %v", err)
+		} else {
+			logger.Debugf("sender", "Buffered ICE Candidate added: %s", senderID)
+		}
 	}
 }
 
@@ -172,6 +201,16 @@ func NewConnectionCallback(
 		if clientID <= senderID {
 			logger.Debugf("sender", "[Glare Avoidance] PeerID(%s) >= MyID(%s). Skip offer.", senderID, clientID)
 			return
+		}
+
+		if existing := manager.GetPeerConnection(senderID); existing != nil {
+			state := existing.ConnectionState()
+			if state != webrtc.PeerConnectionStateFailed && state != webrtc.PeerConnectionStateClosed {
+				logger.Debugf("sender", "PC already exists for request, skipping: %s", senderID)
+				return
+			}
+			existing.Close()
+			manager.RemovePeerConnectionMatching(senderID, existing)
 		}
 
 		if manager.GetForwardReceiverCount() >= 3 {

@@ -142,8 +142,14 @@ func (c *PeerConnectionConfigurer) EnsureOutgoingTracks(
 	if len(localTracks) > 0 {
 		logger.Debugf("sender", "Forwarding %d local tracks [%s]", len(localTracks), peerID)
 		added := false
+		senderKinds := peerConnectionSenderKinds(pc)
 		for _, track := range localTracks {
 			if track == nil {
+				continue
+			}
+			kind := track.Kind()
+			if senderKinds[kind] {
+				logger.Debugf("sender", "Local %s track already exists on PC, skipping [%s]", kind.String(), peerID)
 				continue
 			}
 			sender, err := pc.AddTrack(track)
@@ -152,6 +158,7 @@ func (c *PeerConnectionConfigurer) EnsureOutgoingTracks(
 				continue
 			}
 			webrtc_utils.StartRTCPReadLoop(sender)
+			senderKinds[kind] = true
 			added = true
 		}
 		if added {
@@ -270,6 +277,18 @@ func peerConnectionHasSender(pc *webrtc.PeerConnection) bool {
 		}
 	}
 	return false
+}
+
+func peerConnectionSenderKinds(pc *webrtc.PeerConnection) map[webrtc.RTPCodecType]bool {
+	kinds := make(map[webrtc.RTPCodecType]bool)
+	for _, sender := range pc.GetSenders() {
+		track := sender.Track()
+		if track == nil {
+			continue
+		}
+		kinds[track.Kind()] = true
+	}
+	return kinds
 }
 
 func WaitForStableAndForward(
