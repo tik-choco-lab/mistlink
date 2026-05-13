@@ -105,6 +105,14 @@ func Run(cfg *config.Config) error {
 	pendingCandidates := make(map[string][]webrtc.ICECandidateInit)
 	var pendingCandidatesMu sync.Mutex
 	var inputReady atomic.Bool
+	type pendingInputEvent struct {
+		kind     string
+		data     string
+		senderID string
+	}
+	var pendingInputMu sync.Mutex
+	var pendingInputEvents []pendingInputEvent
+	var drainPendingInput func()
 
 	uw, err := url.Parse(cfg.WHIPURL)
 	if err != nil {
@@ -188,6 +196,9 @@ func Run(cfg *config.Config) error {
 		_ = videoTrack
 		_ = audioTrack
 		inputReady.Store(true)
+		if drainPendingInput != nil {
+			go drainPendingInput()
+		}
 	}
 
 	if cfg.ScreenCapture {
@@ -200,19 +211,53 @@ func Run(cfg *config.Config) error {
 		startSharing("udp", "", "none")
 	}
 
-	offerCallback := NewOfferCallback(manager, sigClient, &webrtcConfig, conn, bridge, &isReceivingRemoteVideo, cfg, clientID)
+	offerCallback := NewOfferCallback(manager, sigClient, &webrtcConfig, conn, bridge, &isReceivingRemoteVideo, cfg, clientID, pendingCandidates, &pendingCandidatesMu)
 	connectionCallback := NewConnectionCallback(manager, sigClient, &webrtcConfig, conn, bridge, &isReceivingRemoteVideo, cfg, clientID)
-	inputIsPending := func(peerID string) bool {
+	queueIfInputPending := func(event pendingInputEvent) bool {
 		if cfg.UseTUI && !inputReady.Load() {
-			logger.Warnf("sender", "input source is not selected yet; ignoring peer request: %s", peerID)
+			pendingInputMu.Lock()
+			queued := false
+			for i, existing := range pendingInputEvents {
+				if existing.kind == event.kind && existing.senderID == event.senderID {
+					if event.kind == "offer" {
+						pendingInputEvents[i] = event
+					}
+					queued = true
+					break
+				}
+			}
+			if !queued {
+				pendingInputEvents = append(pendingInputEvents, event)
+			}
+			pendingInputMu.Unlock()
+			logger.Warnf("sender", "input source is not selected yet; queued peer %s: %s", event.kind, event.senderID)
 			return true
 		}
 		return false
 	}
+	drainPendingInput = func() {
+		pendingInputMu.Lock()
+		events := append([]pendingInputEvent(nil), pendingInputEvents...)
+		pendingInputEvents = nil
+		pendingInputMu.Unlock()
+
+		if len(events) == 0 {
+			return
+		}
+		logger.Infof("sender", "processing %d queued peer events", len(events))
+		for _, event := range events {
+			switch event.kind {
+			case "offer":
+				offerCallback(event.data, event.senderID)
+			case "request":
+				connectionCallback(event.senderID)
+			}
+		}
+	}
 
 	sigClient.SetCallbacks(
 		func(offer string, senderID string) {
-			if inputIsPending(senderID) {
+			if queueIfInputPending(pendingInputEvent{kind: "offer", data: offer, senderID: senderID}) {
 				return
 			}
 			offerCallback(offer, senderID)
@@ -220,7 +265,7 @@ func Run(cfg *config.Config) error {
 		NewAnswerCallback(manager, bridge, pendingCandidates, &pendingCandidatesMu),
 		NewCandidateCallback(manager, pendingCandidates, &pendingCandidatesMu),
 		func(senderID string) {
-			if inputIsPending(senderID) {
+			if queueIfInputPending(pendingInputEvent{kind: "request", senderID: senderID}) {
 				return
 			}
 			connectionCallback(senderID)
