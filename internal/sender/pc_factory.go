@@ -141,15 +141,22 @@ func (c *PeerConnectionConfigurer) EnsureOutgoingTracks(
 	localTracks := c.manager.GetTracks()
 	if len(localTracks) > 0 {
 		logger.Debugf("sender", "Forwarding %d local tracks [%s]", len(localTracks), peerID)
+		added := false
 		for _, track := range localTracks {
+			if track == nil {
+				continue
+			}
 			sender, err := pc.AddTrack(track)
 			if err != nil {
 				logger.Errorf("sender", "Error adding local track: %v", err)
 				continue
 			}
 			webrtc_utils.StartRTCPReadLoop(sender)
+			added = true
 		}
-		return nil
+		if added {
+			return nil
+		}
 	}
 
 	if pc.ConnectionState() == webrtc.PeerConnectionStateClosed {

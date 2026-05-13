@@ -59,6 +59,9 @@ func (m *StreamManager) GetPeerCount() int {
 }
 
 func (m *StreamManager) AddTrack(track webrtc.TrackLocal) {
+	if track == nil {
+		return
+	}
 	m.tMu.Lock()
 	defer m.tMu.Unlock()
 	m.tracks = append(m.tracks, track)
