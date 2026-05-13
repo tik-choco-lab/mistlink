@@ -104,6 +104,7 @@ func Run(cfg *config.Config) error {
 	manager := stream.NewStreamManager(cfg, sigClient, bridge)
 	pendingCandidates := make(map[string][]webrtc.ICECandidateInit)
 	var pendingCandidatesMu sync.Mutex
+	var inputReady atomic.Bool
 
 	uw, err := url.Parse(cfg.WHIPURL)
 	if err != nil {
@@ -130,12 +131,13 @@ func Run(cfg *config.Config) error {
 	}
 
 	startSharing := func(inputType string, target string, audioSource string) {
-		manager.AddTrack(nil) // Trigger any pending logic if needed
-
 		var videoTrack mediadevices.Track
 		var audioTrack mediadevices.Track
 
 		if inputType == "screen" {
+			if target != "" && target != "entire" {
+				logger.Warnf("sender", "specific window capture is not implemented yet; capturing full screen instead: %s", target)
+			}
 			capture.Init()
 			logger.Infof("sender", "Starting Screen Capture...")
 			vp, _ := openh264.NewParams()
@@ -185,6 +187,7 @@ func Run(cfg *config.Config) error {
 
 		_ = videoTrack
 		_ = audioTrack
+		inputReady.Store(true)
 	}
 
 	if cfg.ScreenCapture {
@@ -197,11 +200,31 @@ func Run(cfg *config.Config) error {
 		startSharing("udp", "", "none")
 	}
 
+	offerCallback := NewOfferCallback(manager, sigClient, &webrtcConfig, conn, bridge, &isReceivingRemoteVideo, cfg, clientID)
+	connectionCallback := NewConnectionCallback(manager, sigClient, &webrtcConfig, conn, bridge, &isReceivingRemoteVideo, cfg, clientID)
+	inputIsPending := func(peerID string) bool {
+		if cfg.UseTUI && !inputReady.Load() {
+			logger.Warnf("sender", "input source is not selected yet; ignoring peer request: %s", peerID)
+			return true
+		}
+		return false
+	}
+
 	sigClient.SetCallbacks(
-		NewOfferCallback(manager, sigClient, &webrtcConfig, conn, bridge, &isReceivingRemoteVideo, cfg, clientID),
+		func(offer string, senderID string) {
+			if inputIsPending(senderID) {
+				return
+			}
+			offerCallback(offer, senderID)
+		},
 		NewAnswerCallback(manager, bridge, pendingCandidates, &pendingCandidatesMu),
 		NewCandidateCallback(manager, pendingCandidates, &pendingCandidatesMu),
-		NewConnectionCallback(manager, sigClient, &webrtcConfig, conn, bridge, &isReceivingRemoteVideo, cfg, clientID),
+		func(senderID string) {
+			if inputIsPending(senderID) {
+				return
+			}
+			connectionCallback(senderID)
+		},
 		NewRedirectCallback(sigClient),
 		NewDisconnectCallback(manager),
 	)

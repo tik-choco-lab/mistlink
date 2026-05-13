@@ -172,7 +172,6 @@ func NewConnectionCallback(
 		if clientID <= senderID {
 			logger.Debugf("sender", "[Glare Avoidance] PeerID(%s) >= MyID(%s). Skip offer.", senderID, clientID)
 			return
-			return
 		}
 
 		if manager.GetForwardReceiverCount() >= 3 {

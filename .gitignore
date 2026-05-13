@@ -4,5 +4,6 @@ mistlink.exe
 mistlink.zip
 mistlink.exe~
 bin/
-ref/
+ref/*
+!ref/go.mod
 *.exe
