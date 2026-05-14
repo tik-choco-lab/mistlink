@@ -94,9 +94,7 @@ func HandleOfferAsReceiver(
 
 		if err := configurer.EnsureOutgoingTracks(senderID, pc, true, true); err != nil {
 			pc.Close()
-			if isNewPC {
-				manager.RemovePeerConnectionMatching(senderID, pc)
-			}
+			manager.RemovePeerConnectionMatching(senderID, pc)
 			return err
 		}
 
@@ -115,17 +113,13 @@ func HandleOfferAsReceiver(
 		answer, err := pc.CreateAnswer(nil)
 		if err != nil {
 			pc.Close()
-			if isNewPC {
-				manager.RemovePeerConnectionMatching(senderID, pc)
-			}
+			manager.RemovePeerConnectionMatching(senderID, pc)
 			return fmt.Errorf("CreateAnswer Error: %w", err)
 		}
 
 		if err := pc.SetLocalDescription(answer); err != nil {
 			pc.Close()
-			if isNewPC {
-				manager.RemovePeerConnectionMatching(senderID, pc)
-			}
+			manager.RemovePeerConnectionMatching(senderID, pc)
 			return fmt.Errorf("SetLocalDescription Error: %w", err)
 		}
 

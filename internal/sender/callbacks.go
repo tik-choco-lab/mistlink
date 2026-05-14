@@ -204,11 +204,7 @@ func NewConnectionCallback(
 		}
 
 		if existing := manager.GetPeerConnection(senderID); existing != nil {
-			state := existing.ConnectionState()
-			if state != webrtc.PeerConnectionStateFailed && state != webrtc.PeerConnectionStateClosed {
-				logger.Debugf("sender", "PC already exists for request, skipping: %s", senderID)
-				return
-			}
+			logger.Warnf("sender", "Replacing existing PC for reconnect request: %s (state=%s)", senderID, existing.ConnectionState().String())
 			existing.Close()
 			manager.RemovePeerConnectionMatching(senderID, existing)
 		}

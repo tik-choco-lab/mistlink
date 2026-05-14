@@ -81,6 +81,7 @@ func CreatePeerConnection(
 	logger.Debugf("sender", "Creating Offer: %s", receiverID)
 	if err := webrtc_utils.CreateAndSendOffer(pc, receiverID, sigClient); err != nil {
 		pc.Close()
+		manager.RemovePeerConnectionMatching(receiverID, pc)
 		return err
 	}
 	logger.Debugf("sender", "Offer sent: %s", receiverID)
