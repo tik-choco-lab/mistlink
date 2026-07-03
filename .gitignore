@@ -7,3 +7,6 @@ bin/
 ref/*
 !ref/go.mod
 *.exe
+.env
+.omc/
+third_party/mistlib/
