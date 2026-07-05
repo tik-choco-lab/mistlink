@@ -1,4 +1,4 @@
-FROM golang:1.23-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
 
 RUN apt-get update && apt-get install -y \
     mingw-w64 build-essential pkg-config cmake git wget autoconf libtool
@@ -20,6 +20,7 @@ COPY . .
 
 ENV GOOS=windows GOARCH=amd64 CGO_ENABLED=1 \
     CC=x86_64-w64-mingw32-gcc \
+    CXX=x86_64-w64-mingw32-g++ \
     PKG_CONFIG_PATH=/usr/x86_64-w64-mingw32/lib/pkgconfig
 
 RUN go build -ldflags '-extldflags "-static"' -o mistlink.exe ./cmd/mistlink
